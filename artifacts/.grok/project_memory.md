@@ -1,6 +1,0 @@
-- Project: Polish-Thai phrasebook web app "Thai dla Polaków" for mobile, deployable on Cloudflare Pages [2026-10-27]
-- Structure: index.html + styles.css + app.js + data.js (static SPA)
-- Features: category grid, interactive templates (food, directions, transport), gender-based polite particles (ครับ/ค่ะ), large Thai script + romanization, Web Speech API for pronunciation
-- Categories implemented: Pozdrowienia, Jedzenie, Kierunki, Transport, Zakupy, Hotel, Nagłe wypadki, Liczby, Podstawowe
-- Data source: data.js with phrases and option templates
-- Saved files in /workspace/artifacts/ [2026-10-27]
