@@ -236,9 +236,35 @@ export function readThai(text: string, known: ReadonlyMap<string, string>): stri
 function segmentThai(text: string): string[] {
   if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
     const segmenter = new Intl.Segmenter("th", { granularity: "word" });
-    return [...segmenter.segment(text)].map((item) => item.segment);
+    return mend([...segmenter.segment(text)].map((item) => item.segment));
   }
   return text.split(/\s+/);
+}
+
+const OPEN_END = new Set([..."าิีึืุู"]);
+
+/**
+ * Segmenter gubi się w zapożyczeniach (ซิ|มการ์ด zamiast ซิม|การ์ด): kawałek zaczyna się od
+ * spółgłoski, po której od razu idzie nowa sylaba. Taka spółgłoska zamyka poprzednią sylabę.
+ */
+function mend(pieces: string[]) {
+  for (let k = 1; k < pieces.length; k += 1) {
+    const prev = pieces[k - 1];
+    const cur = pieces[k];
+    if (
+      OPEN_END.has(prev.at(-1) ?? "") &&
+      isCons(cur[0]) &&
+      cur[0] !== "ห" &&
+      cur[0] !== "อ" &&
+      isCons(cur[1]) &&
+      VOWEL_AFTER.has(cur[2] ?? "") &&
+      !(CLUSTER.has(cur[0]) && (cur[1] === "ร" || cur[1] === "ล" || cur[1] === "ว"))
+    ) {
+      pieces[k - 1] = prev + cur[0];
+      pieces[k] = cur.slice(1);
+    }
+  }
+  return pieces;
 }
 
 /** Najmniej kawałków ze słownika, które razem dają dokładnie to słowo — albo nic. */

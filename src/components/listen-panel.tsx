@@ -1,24 +1,18 @@
 import { ArrowRight, Check, Loader2, Mic, MicOff, Volume2, X } from "lucide-react";
 import { categories, polish, renderPhrase, type Speaker } from "@/data/phrases";
-import { sayLine, thaiReadings } from "@/data/words";
+import { sayLine } from "@/data/words";
 import { playThai } from "@/lib/play-thai";
 import { MODELS } from "@/lib/speech/asr-protocol";
 import { sayNumber } from "@/lib/speech/intent";
-import { readThai } from "@/lib/speech/romanize";
+import { reading } from "@/lib/speech/reading";
+import type { Translator } from "@/lib/translate/use-translator";
+import { HeardTranslation } from "@/components/translation";
 import { matcher, type Heard, type ListenMode, type Listener } from "@/lib/speech/use-listener";
 
 const MODES: { id: ListenMode; label: string; hint: string }[] = [
   { id: "th", label: "Taj mówi", hint: "Tylko tajski" },
   { id: "pl", label: "Ja mówię", hint: "Powiedz po polsku, co chcesz przekazać" },
 ];
-
-const READINGS = thaiReadings();
-const THAI = /[฀-๿]/;
-
-/** Tajskie „robaczki” → jak to przeczytać po polsku; dla innego tekstu nic. */
-function reading(text: string) {
-  return THAI.test(text) ? readThai(text, READINGS) : "";
-}
 
 function categoryName(id: string | null) {
   return categories.find((category) => category.id === id)?.name ?? null;
@@ -61,11 +55,13 @@ function loadingDetail(listener: Listener) {
 
 export function ListenPanel({
   listener,
+  translator,
   speaker,
   onOpenPhrase,
   onOpenCategory,
 }: {
   listener: Listener;
+  translator: Translator;
   speaker: Speaker;
   onOpenPhrase: (id: string) => void;
   onOpenCategory: (id: string) => void;
@@ -178,6 +174,7 @@ export function ListenPanel({
       {latest ? (
         <HeardCard
           heard={latest}
+          translator={translator}
           speaker={speaker}
           onOpenPhrase={onOpenPhrase}
           onOpenCategory={onOpenCategory}
@@ -248,11 +245,13 @@ function openSuggestion(
 
 function HeardCard({
   heard,
+  translator,
   speaker,
   onOpenPhrase,
   onOpenCategory,
 }: {
   heard: Heard;
+  translator: Translator;
   speaker: Speaker;
   onOpenPhrase: (id: string) => void;
   onOpenCategory: (id: string) => void;
@@ -279,16 +278,13 @@ function HeardCard({
           <span className="font-medium">{read}</span>
         </p>
       ) : null}
+      <HeardTranslation translator={translator} text={heard.text} speaker={speaker} />
       {suggestion?.meaning ? (
-        <p className="mt-0.5 text-sm">
-          <span className="text-muted">Znaczy mniej więcej: </span>
+        <p className="mt-2 text-sm">
+          <span className="text-muted">W rozmówkach: </span>
           <span className="font-medium">{suggestion.meaning}</span>
         </p>
-      ) : (
-        <p className="mt-0.5 text-sm text-muted">
-          Nie wiem, o co chodzi. Pokaż „Możesz powtórzyć?” albo poproś o zapisanie.
-        </p>
-      )}
+      ) : null}
 
       {suggestion?.numbers.map((value) => {
         const said = sayNumber(value);

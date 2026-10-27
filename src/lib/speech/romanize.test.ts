@@ -46,6 +46,10 @@ describe("readThai", () => {
     assert.equal(readThai("กรุงเทพ", known), "grung-tep");
   });
 
+  it("mends loanwords the segmenter splits mid-syllable", () => {
+    assert.equal(readThai("ซื้อซิมการ์ด", known), "sy sim gat");
+  });
+
   it("repeats words marked with ๆ and passes digits through", () => {
     assert.equal(readThai("ช้าๆ 50 บาท", known), "cza-cza 50 bat");
   });

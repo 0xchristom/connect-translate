@@ -4,6 +4,7 @@ import {
   Car,
   Delete,
   Hash,
+  Languages,
   HeartPulse,
   MessageCircleReply,
   MessageSquare,
@@ -30,7 +31,9 @@ import { coachWords, joins, sayLine } from "@/data/words";
 import { onPlayError, onPlaying, playThai } from "@/lib/play-thai";
 import { normalizePolish, sayNumber } from "@/lib/speech/intent";
 import { useListener } from "@/lib/speech/use-listener";
+import { useTranslator } from "@/lib/translate/use-translator";
 import { ListenPanel } from "@/components/listen-panel";
+import { TranslatePanel } from "@/components/translation";
 
 const SPEAKER_KEY = "powiedz-speaker";
 const FAV_KEY = "powiedz-favs";
@@ -112,6 +115,8 @@ export function Phrasebook() {
   const dock = useRef<HTMLElement>(null);
   const swipe = useRef<{ x: number; y: number } | null>(null);
   const listener = useListener();
+  const translator = useTranslator();
+  const [translateOpen, setTranslateOpen] = useState(false);
 
   useEffect(() => onPlaying(setPlaying), []);
   useEffect(() => onPlayError(setPlayError), []);
@@ -377,6 +382,15 @@ export function Phrasebook() {
                 </button>
                 <button
                   type="button"
+                  aria-label="Tłumacz"
+                  aria-pressed={translateOpen}
+                  onClick={() => setTranslateOpen((open) => !open)}
+                  className="grid size-10 place-items-center rounded-md"
+                >
+                  <Languages className="size-5" />
+                </button>
+                <button
+                  type="button"
                   aria-label="Szukaj"
                   aria-pressed={searchOpen || Boolean(query)}
                   onClick={() => setSearchOpen((open) => !open)}
@@ -551,9 +565,18 @@ export function Phrasebook() {
         </section>
       </div>
 
+      {expanded || !translateOpen ? null : (
+        <TranslatePanel
+          translator={translator}
+          speaker={speaker}
+          onClose={() => setTranslateOpen(false)}
+        />
+      )}
+
       {expanded ? null : (
         <ListenPanel
           listener={listener}
+          translator={translator}
           speaker={speaker}
           onOpenPhrase={openById}
           onOpenCategory={selectCategory}
