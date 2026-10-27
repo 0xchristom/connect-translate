@@ -1,15 +1,24 @@
 import { ArrowRight, Check, Loader2, Mic, MicOff, Volume2, X } from "lucide-react";
 import { categories, polish, renderPhrase, type Speaker } from "@/data/phrases";
-import { sayLine } from "@/data/words";
+import { sayLine, thaiReadings } from "@/data/words";
 import { playThai } from "@/lib/play-thai";
 import { MODELS } from "@/lib/speech/asr-protocol";
 import { sayNumber } from "@/lib/speech/intent";
+import { readThai } from "@/lib/speech/romanize";
 import { matcher, type Heard, type ListenMode, type Listener } from "@/lib/speech/use-listener";
 
 const MODES: { id: ListenMode; label: string; hint: string }[] = [
   { id: "th", label: "Taj mówi", hint: "Tylko tajski" },
   { id: "pl", label: "Ja mówię", hint: "Powiedz po polsku, co chcesz przekazać" },
 ];
+
+const READINGS = thaiReadings();
+const THAI = /[฀-๿]/;
+
+/** Tajskie „robaczki” → jak to przeczytać po polsku; dla innego tekstu nic. */
+function reading(text: string) {
+  return THAI.test(text) ? readThai(text, READINGS) : "";
+}
 
 function categoryName(id: string | null) {
   return categories.find((category) => category.id === id)?.name ?? null;
@@ -189,8 +198,11 @@ export function ListenPanel({
           <ul className="mt-1">
             {older.map((item) => (
               <li key={item.id} className="flex items-center gap-2 py-1.5 text-sm">
-                <span lang="th" className="min-w-0 flex-1 truncate">
-                  {item.text}
+                <span className="min-w-0 flex-1 truncate">
+                  <span lang="th">{item.text}</span>
+                  {reading(item.text) ? (
+                    <span className="text-muted"> · {reading(item.text)}</span>
+                  ) : null}
                 </span>
                 {item.suggestion?.meaning ? (
                   <span className="shrink-0 text-xs text-muted">{item.suggestion.meaning}</span>
@@ -247,12 +259,26 @@ function HeardCard({
 }) {
   const suggestion = heard.suggestion;
   const section = categoryName(suggestion?.categoryId ?? null);
+  const read = reading(heard.text);
   return (
     <div key={heard.id} className="phrase-in px-3 py-3">
-      <p className="text-xs text-muted">Usłyszane</p>
+      <p className="flex justify-between text-xs text-muted">
+        <span>Usłyszane</span>
+        <span>
+          rozpoznane w {(heard.ms / 1000).toLocaleString("pl-PL", { maximumFractionDigits: 1 })} s
+          {/* Bez izolacji ONNX liczy na jednym rdzeniu — wtedy wolno nie przez model, a przez przeglądarkę. */}
+          {globalThis.crossOriginIsolated ? "" : " · 1 rdzeń"}
+        </span>
+      </p>
       <p lang={suggestion?.lang ?? "th"} className="text-lg leading-snug font-medium">
         {heard.text}
       </p>
+      {read ? (
+        <p className="text-base leading-snug">
+          <span className="text-muted">Czyta się: </span>
+          <span className="font-medium">{read}</span>
+        </p>
+      ) : null}
       {suggestion?.meaning ? (
         <p className="mt-0.5 text-sm">
           <span className="text-muted">Znaczy mniej więcej: </span>

@@ -476,6 +476,19 @@ export const joins = [
   { pl: "oraz", th: "และก็", say: "lae-go", gloss: "oraz, i też. Doklejasz drugie zdanie." },
 ] as const;
 
+/** Wymowa każdego tajskiego słowa z podpowiedzi — słownik do odczytu usłyszanych zdań. */
+export function thaiReadings(): Map<string, string> {
+  const known = new Map<string, string>();
+  for (const bit of Object.values(particle)) known.set(bit.th, bit.say);
+  for (const item of joins) known.set(item.th, item.say);
+  for (const words of Object.values(WORDS)) {
+    for (const word of words) {
+      if (word.th !== "{p}" && !known.has(word.th)) known.set(word.th, word.say);
+    }
+  }
+  return known;
+}
+
 export function sayLine(phrase: Phrase, speaker: Speaker) {
   return coachWords(phrase, speaker)
     .map((word) => word.say)

@@ -1,8 +1,10 @@
 /**
  * Lets ONNX Runtime run speech recognition on several threads: SharedArrayBuffer needs a
  * cross-origin-isolated document. Document-Isolation-Policy isolates just this document,
- * so unlike COOP/COEP it keeps `window.opener` working for the auth popup. Browsers that
- * don't know the header ignore it and recognition stays single-threaded.
+ * but Chrome for Android long lacked it, so recognition there ran on one core — several
+ * times slower. COOP + COEP `credentialless` isolate it too (static files get the same pair
+ * from public/_headers). The cost — no `window.opener` across origins — doesn't matter here:
+ * the app has no sign-in popup. Browsers that know neither stay single-threaded.
  */
 interface IsolationEvent {
   url: URL;
@@ -21,6 +23,8 @@ export default async function isolationMiddleware(
   }
   const headers = new Headers(result.headers);
   headers.set("document-isolation-policy", "isolate-and-credentialless");
+  headers.set("cross-origin-opener-policy", "same-origin");
+  headers.set("cross-origin-embedder-policy", "credentialless");
   return new Response(result.body, {
     status: result.status,
     statusText: result.statusText,

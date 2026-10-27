@@ -167,6 +167,8 @@ function documentIsolationPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use((_req, res, next) => {
         res.setHeader("Document-Isolation-Policy", "isolate-and-credentialless");
+        res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+        res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
         next();
       });
     },
