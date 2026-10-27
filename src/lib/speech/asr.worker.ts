@@ -33,7 +33,25 @@ async function load(model: string) {
     // offline i nic nie wychodzi do obcych domen. Wariant bez WebGPU/asyncify (14 MB zamiast 27),
     // bo i tak liczymy na WASM.
     if (env.backends.onnx.wasm) env.backends.onnx.wasm.wasmPaths = { mjs: ortMjs, wasm: ortWasm };
+    post({ type: "stage", stage: "download" });
+    // `progress_total` zna rozmiary wszystkich plików z góry, więc pasek nie cofa się, gdy
+    // zaczyna się kolejny plik. Pojedyncze `progress` zostają na wypadek, gdyby go zabrakło.
     const files = new Map<string, { loaded: number; total: number }>();
+    let hasTotal = false;
+    let lastPost = 0;
+    let initPosted = false;
+    const report = (loaded: number, total: number) => {
+      const now = performance.now();
+      const finished = total > 0 && loaded >= total;
+      // Tysiące zdarzeń na plik — wystarczy kilka na sekundę.
+      if (!finished && now - lastPost < 150) return;
+      lastPost = now;
+      post({ type: "progress", loaded, total });
+      if (finished && !initPosted) {
+        initPosted = true;
+        post({ type: "stage", stage: "init" });
+      }
+    };
     const asr = await pipeline("automatic-speech-recognition", model, {
       revision: MODELS.find((item) => item.id === model)?.revision ?? "main",
       // WASM + 8 bitów: najmniejszy plik i działa na każdym telefonie. Na WebGPU dobre
@@ -46,7 +64,12 @@ async function load(model: string) {
         loaded?: number;
         total?: number;
       }) => {
-        if (info.status !== "progress" || !info.file) return;
+        if (info.status === "progress_total") {
+          hasTotal = true;
+          report(info.loaded ?? 0, info.total ?? 0);
+          return;
+        }
+        if (hasTotal || info.status !== "progress" || !info.file) return;
         files.set(info.file, { loaded: info.loaded ?? 0, total: info.total ?? 0 });
         let loaded = 0;
         let total = 0;
@@ -54,13 +77,19 @@ async function load(model: string) {
           loaded += item.loaded;
           total += item.total;
         }
-        post({ type: "progress", loaded, total });
+        report(loaded, total);
       },
     });
+    if (!initPosted) post({ type: "stage", stage: "init" });
     transcriber = asr as unknown as Transcriber;
     // Rozgrzewka: pierwsze wywołanie inicjuje WASM i alokuje pamięć, więc nie płaci za to
-    // pierwsza prawdziwa wypowiedź.
-    await transcriber(new Float32Array(16000), { language: "thai", task: "transcribe" });
+    // pierwsza prawdziwa wypowiedź. Jeden token wystarczy — na ciszy Whisper bez limitu
+    // zapętla się („สิบ สิบ สิบ…”) do ~450 tokenów, co na telefonie trwało minutami.
+    await transcriber(new Float32Array(16000), {
+      language: "thai",
+      task: "transcribe",
+      max_new_tokens: 1,
+    });
     return transcriber;
   })();
   try {

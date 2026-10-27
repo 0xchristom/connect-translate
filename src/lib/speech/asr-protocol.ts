@@ -9,7 +9,11 @@ export type AsrRequest =
       language: string;
     };
 
+/** download: pobieranie plików (albo odczyt z pamięci); init: sesja ONNX i rozgrzewka. */
+export type AsrStage = "download" | "init";
+
 export type AsrResponse =
+  | { type: "stage"; stage: AsrStage }
   | { type: "progress"; loaded: number; total: number }
   | { type: "ready" }
   | { type: "result"; id: number; text: string; ms: number }

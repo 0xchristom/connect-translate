@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { categories } from "@/data/phrases";
 import { cues, hallucinations } from "@/data/cues";
 import { onPlaying } from "@/lib/play-thai";
-import type { AsrRequest, AsrResponse } from "./asr-protocol";
+import type { AsrRequest, AsrResponse, AsrStage } from "./asr-protocol";
 import { MODELS } from "./asr-protocol";
 import { createMatcher, hasThai, type Suggestion } from "./intent";
 import { startMic, type MicHandle } from "./mic";
@@ -24,6 +24,17 @@ const READY_KEY = "powiedz-asr-ready";
 const MODE_KEY = "powiedz-asr-mode";
 // Języka nie zgadujemy: na krótkich wypowiedziach wykrywanie Whispera myli tajski z angielskim.
 const LANGUAGE: Record<ListenMode, string> = { th: "thai", pl: "polish" };
+// Bez żadnej wiadomości z workera przez tyle czasu: pobieranie stoi albo telefon ubił workera
+// (np. zabrakło pamięci) — wtedy nie przychodzi żaden błąd, więc trzeba to wykryć samemu.
+const STALL_MS = 20_000;
+const INIT_TIMEOUT_MS = 180_000;
+
+export type LoadProgress = {
+  loaded: number;
+  total: number;
+  /** Bajty na sekundę od początku pobierania; 0, dopóki nie ma z czego liczyć. */
+  rate: number;
+};
 
 function read(key: string) {
   try {
@@ -57,7 +68,11 @@ export function useListener() {
   const [model, setModelState] = useState(MODELS[0].id);
   const [mode, setModeState] = useState<ListenMode>("th");
   const [downloaded, setDownloaded] = useState(false);
-  const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [progress, setProgress] = useState<LoadProgress | null>(null);
+  const [stage, setStage] = useState<AsrStage>("download");
+  /** Sekundy w bieżącym etapie ładowania. */
+  const [elapsed, setElapsed] = useState(0);
+  const [stalled, setStalled] = useState(false);
   const [level, setLevel] = useState(0);
   const [speaking, setSpeaking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -71,6 +86,12 @@ export function useListener() {
   const inFlight = useRef(false);
   const nextId = useRef(1);
   const modelReady = useRef(false);
+  /** Model, który worker właśnie ładuje — ponowne „Słuchaj” nie zaczyna od zera. */
+  const loadingFor = useRef<string | null>(null);
+  const stageRef = useRef<AsrStage>("download");
+  const stageSince = useRef(0);
+  const lastMessage = useRef(0);
+  const firstSample = useRef<{ at: number; loaded: number } | null>(null);
   const modeRef = useRef(mode);
   const modelRef = useRef(model);
   modeRef.current = mode;
@@ -111,9 +132,25 @@ export function useListener() {
     const created = new Worker(new URL("./asr.worker.ts", import.meta.url), { type: "module" });
     created.onmessage = (event: MessageEvent<AsrResponse>) => {
       const message = event.data;
-      if (message.type === "progress") {
-        setProgress({ loaded: message.loaded, total: message.total });
+      lastMessage.current = Date.now();
+      setStalled(false);
+      if (message.type === "stage") {
+        stageRef.current = message.stage;
+        stageSince.current = Date.now();
+        setStage(message.stage);
+        setElapsed(0);
+      } else if (message.type === "progress") {
+        const now = Date.now();
+        const first = firstSample.current;
+        if (!first) firstSample.current = { at: now, loaded: message.loaded };
+        const seconds = first ? (now - first.at) / 1000 : 0;
+        setProgress({
+          loaded: message.loaded,
+          total: message.total,
+          rate: first && seconds > 1 ? (message.loaded - first.loaded) / seconds : 0,
+        });
       } else if (message.type === "ready") {
+        loadingFor.current = null;
         modelReady.current = true;
         write(READY_KEY, modelRef.current);
         setDownloaded(true);
@@ -142,17 +179,52 @@ export function useListener() {
             ? "Nie udało się pobrać modelu mowy. Sprawdź internet i spróbuj jeszcze raz."
             : "Nie udało się rozpoznać ostatniej wypowiedzi.",
         );
-        if (message.id === undefined) setStatus("error");
+        if (message.id === undefined) {
+          loadingFor.current = null;
+          setStatus("error");
+        }
         pump();
       }
     };
-    created.onerror = () => {
+    const fail = () => {
+      loadingFor.current = null;
       setError("Rozpoznawanie mowy nie działa w tej przeglądarce.");
       setStatus("error");
     };
+    created.onerror = fail;
+    created.onmessageerror = fail;
     worker.current = created;
     return created;
   }, [pump]);
+
+  const killWorker = useCallback(() => {
+    worker.current?.terminate();
+    worker.current = null;
+    loadingFor.current = null;
+    modelReady.current = false;
+    inFlight.current = false;
+    setBusy(false);
+  }, []);
+
+  /** Zeruje wskaźniki postępu i każe workerowi załadować model. */
+  const beginLoad = useCallback(
+    (id: string) => {
+      ensureWorker();
+      loadingFor.current = id;
+      modelReady.current = false;
+      firstSample.current = null;
+      stageRef.current = "download";
+      stageSince.current = Date.now();
+      lastMessage.current = Date.now();
+      setStage("download");
+      setElapsed(0);
+      setStalled(false);
+      setProgress(null);
+      setStatus("loading");
+      send({ type: "load", model: id });
+    },
+    [ensureWorker, send],
+  );
 
   const stopMic = useCallback(() => {
     mic.current?.stop();
@@ -172,9 +244,8 @@ export function useListener() {
       return;
     }
     stopMic();
-    setStatus("loading");
-    ensureWorker();
-    send({ type: "load", model: modelRef.current });
+    if (modelReady.current || loadingFor.current === modelRef.current) setStatus("loading");
+    else beginLoad(modelRef.current);
     try {
       mic.current = await startMic({
         onLevel: (value, isSpeaking) => {
@@ -201,7 +272,13 @@ export function useListener() {
       /* bez blokady wygaszania też działa */
     }
     setStatus(modelReady.current ? "listening" : "loading");
-  }, [ensureWorker, pump, send, stopMic]);
+  }, [beginLoad, pump, stopMic]);
+
+  /** Zawieszone pobieranie samo nie ruszy — nowy worker zaczyna od plików, których brakuje. */
+  const retry = useCallback(() => {
+    killWorker();
+    beginLoad(modelRef.current);
+  }, [beginLoad, killWorker]);
 
   const stop = useCallback(() => {
     stopMic();
@@ -220,12 +297,13 @@ export function useListener() {
       write(MODEL_KEY, id);
       setDownloaded(read(READY_KEY) === id);
       modelReady.current = false;
+      // Nowy worker: zwalnia pamięć po poprzednim modelu i nie miesza postępu dwóch pobierań.
       if (mic.current) {
-        setStatus("loading");
-        send({ type: "load", model: id });
+        killWorker();
+        beginLoad(id);
       }
     },
-    [send],
+    [beginLoad, killWorker],
   );
 
   const setMode = useCallback((value: ListenMode) => {
@@ -246,6 +324,28 @@ export function useListener() {
       window.clearTimeout(timer);
     };
   }, []);
+
+  // Licznik sekund i strażnik ładowania: telefon potrafi po cichu ubić workera, gdy
+  // brakuje pamięci, a zerwane pobieranie też nie zawsze kończy się błędem.
+  useEffect(() => {
+    if (status !== "loading") return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setElapsed(Math.floor((now - stageSince.current) / 1000));
+      const quiet = now - lastMessage.current;
+      if (stageRef.current === "download") {
+        setStalled(quiet > STALL_MS);
+      } else if (quiet > INIT_TIMEOUT_MS) {
+        killWorker();
+        stopMic();
+        setError(
+          "Model nie uruchomił się — telefonowi mogło zabraknąć pamięci. Spróbuj jeszcze raz albo wybierz lżejszy model.",
+        );
+        setStatus("error");
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [killWorker, status, stopMic]);
 
   // Blokada wygaszania znika po schowaniu karty — odnawiamy ją po powrocie.
   useEffect(() => {
@@ -279,6 +379,9 @@ export function useListener() {
     mode,
     downloaded,
     progress,
+    stage,
+    elapsed,
+    stalled,
     level,
     speaking,
     busy,
@@ -286,6 +389,7 @@ export function useListener() {
     error,
     start,
     stop,
+    retry,
     open,
     setModel,
     setMode,

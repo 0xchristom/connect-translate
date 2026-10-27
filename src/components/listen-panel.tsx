@@ -19,6 +19,37 @@ function megabytes(bytes: number) {
   return Math.round(bytes / 1e6);
 }
 
+function duration(seconds: number) {
+  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
+  return `${Math.round(seconds / 60)} min`;
+}
+
+function loadingTitle(listener: Listener, percent: number | null) {
+  if (listener.stage === "init") return "Uruchamiam model…";
+  if (percent === null) return "Łączę się z serwerem modeli…";
+  return `Pobieram model… ${percent}%`;
+}
+
+function loadingDetail(listener: Listener) {
+  const { progress, stage, elapsed, stalled, downloaded } = listener;
+  if (stage === "init") {
+    return elapsed < 8
+      ? "Ładuję model do pamięci telefonu."
+      : `Ładuję model do pamięci telefonu (${elapsed} s). Na starszych telefonach trwa to do minuty.`;
+  }
+  if (stalled) return "Pobieranie stoi. Sprawdź internet albo spróbuj ponownie.";
+  if (!progress || progress.total === 0) {
+    return downloaded ? "Wczytuję model zapisany w telefonie." : "Za chwilę ruszy pobieranie.";
+  }
+  const parts = [`${megabytes(progress.loaded)} z ${megabytes(progress.total)} MB`];
+  if (progress.rate > 0) {
+    parts.push(`${(progress.rate / 1e6).toFixed(1).replace(".", ",")} MB/s`);
+    const left = (progress.total - progress.loaded) / progress.rate;
+    if (left > 1) parts.push(`zostało ok. ${duration(left)}`);
+  }
+  return parts.join(" · ") + ". Pobiera się tylko raz — potem działa bez internetu.";
+}
+
 export function ListenPanel({
   listener,
   speaker,
@@ -49,9 +80,7 @@ export function ListenPanel({
         <StatusDot listener={listener} />
         <p className="min-w-0 flex-1 truncate text-sm font-medium" aria-live="polite">
           {status === "loading"
-            ? percent !== null && percent < 100
-              ? `Pobieram… ${percent}%`
-              : "Uruchamiam…"
+            ? loadingTitle(listener, percent)
             : listener.busy
               ? "Rozpoznaję…"
               : listener.speaking
@@ -88,17 +117,37 @@ export function ListenPanel({
 
       {status === "loading" ? (
         <div className="px-3 py-3">
-          <div className="h-1.5 overflow-hidden rounded-full bg-line">
-            <div
-              className="h-full rounded-full bg-accent transition-[width] duration-300"
-              style={{ width: `${Math.min(percent ?? 8, 100)}%` }}
-            />
+          <div
+            role="progressbar"
+            aria-label={loadingTitle(listener, percent)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={listener.stage === "download" && percent !== null ? percent : undefined}
+            className="h-1.5 overflow-hidden rounded-full bg-line"
+          >
+            {listener.stage === "download" && percent !== null ? (
+              <div
+                className={
+                  "h-full rounded-full transition-[width] duration-300 " +
+                  (listener.stalled ? "bg-amber-500" : "bg-accent")
+                }
+                style={{ width: `${Math.min(Math.max(percent, 2), 100)}%` }}
+              />
+            ) : (
+              // Czasu ładowania do pamięci nie da się zmierzyć — pasek pokazuje, że coś się dzieje.
+              <div className="progress-indeterminate h-full w-1/3 rounded-full bg-accent" />
+            )}
           </div>
-          <p className="mt-2 text-xs text-muted">
-            {percent !== null && percent < 100 && listener.progress
-              ? `${megabytes(listener.progress.loaded)} z ${megabytes(listener.progress.total)} MB. Pobiera się tylko raz — potem działa bez internetu.`
-              : "Ładuję model do pamięci telefonu. Zwykle kilka sekund."}
-          </p>
+          <p className="mt-2 text-xs text-muted">{loadingDetail(listener)}</p>
+          {listener.stalled ? (
+            <button
+              type="button"
+              onClick={listener.retry}
+              className="mt-2 h-8 rounded-md border border-line px-3 text-xs font-medium"
+            >
+              Spróbuj ponownie
+            </button>
+          ) : null}
         </div>
       ) : null}
 
