@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BedDouble,
   Car,
@@ -61,6 +61,8 @@ export function Phrasebook() {
   const [hydrated, setHydrated] = useState(false);
   const [playing, setPlaying] = useState<string | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => onPlaying(setPlaying), []);
   useEffect(() => onPlayError(setPlayError), []);
@@ -134,16 +136,19 @@ export function Phrasebook() {
     setPhraseId(phrase.id);
     localStorage.setItem(LAST_KEY, phrase.id);
     if (phrase.categoryId !== "moje") setCategoryId(phrase.categoryId);
+    scroller.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function selectCategory(id: string) {
     setQuery("");
+    setSearchOpen(false);
     setCategoryId(id);
     const list = id === "moje" ? favoritePhrases : (categories.find((category) => category.id === id)?.phrases ?? []);
     const first = list[0];
     if (!first) return;
     setPhraseId(first.id);
     localStorage.setItem(LAST_KEY, first.id);
+    scroller.current?.scrollTo({ top: 0 });
   }
 
   function step(delta: number) {
@@ -161,79 +166,91 @@ export function Phrasebook() {
 
   return (
     <main className="mx-auto flex h-dvh max-w-5xl flex-col bg-bg text-ink">
-      <header className="flex items-center gap-3 border-b border-line bg-surface px-3 py-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium tracking-wide text-muted">Powiedz to</p>
-          <div className="mt-1 flex rounded-md bg-bg p-0.5">
-            <button
-              type="button"
-              className={
-                "h-9 flex-1 rounded-sm text-sm font-medium " +
-                (speaker === "m" ? "bg-accent text-accent-fg" : "text-muted")
-              }
-              onClick={() => setSpeaker("m")}
-            >
-              Mężczyzna
-            </button>
-            <button
-              type="button"
-              className={
-                "h-9 flex-1 rounded-sm text-sm font-medium " +
-                (speaker === "f" ? "bg-accent text-accent-fg" : "text-muted")
-              }
-              onClick={() => setSpeaker("f")}
-            >
-              Kobieta
-            </button>
-          </div>
-        </div>
-        <label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-bg px-3">
-          <Search className="size-4 shrink-0 text-muted" aria-hidden="true" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Szukaj zdania"
-            className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
-            aria-label="Szukaj zdania"
-          />
-          {query ? (
-            <button type="button" aria-label="Wyczyść" onClick={() => setQuery("")}>
-              <X className="size-4 text-muted" />
-            </button>
-          ) : null}
-        </label>
-      </header>
-
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div
+        ref={scroller}
+        className={
+          "flex min-h-0 flex-1 flex-col " +
+          (expanded ? "overflow-hidden" : "overflow-y-auto md:flex-row md:overflow-hidden")
+        }
+      >
         <section
           className={
             "flex shrink-0 flex-col bg-card text-card-fg " +
-            (expanded ? "min-h-0 flex-1" : "h-80 md:h-auto md:w-[46%]")
+            (expanded ? "min-h-0 flex-1" : "md:w-[46%] md:overflow-y-auto")
           }
         >
-          <div key={current.id + speaker} className="phrase-in flex min-h-0 flex-1 flex-col justify-between px-5 py-4">
-            <div className="flex items-start justify-between gap-3">
-              <p className="text-sm text-card-muted">{current.pl}</p>
-              <button
-                type="button"
-                aria-label={favored ? "Usuń z moich" : "Zapisz w moich"}
-                onClick={toggleFav}
-                className="grid size-11 place-items-center rounded-md"
-              >
-                <Star className="size-5" fill={favored ? "currentColor" : "none"} />
-              </button>
+          <div key={current.id + speaker} className="phrase-in px-4 pt-3 pb-2">
+            <div className="flex items-center gap-2">
+              <div className="flex rounded-md bg-white/10 p-0.5">
+                <button
+                  type="button"
+                  className={
+                    "h-8 rounded-sm px-2.5 text-xs font-medium " +
+                    (speaker === "m" ? "bg-accent-fg text-ink" : "text-card-muted")
+                  }
+                  onClick={() => setSpeaker("m")}
+                >
+                  Mężczyzna
+                </button>
+                <button
+                  type="button"
+                  className={
+                    "h-8 rounded-sm px-2.5 text-xs font-medium " +
+                    (speaker === "f" ? "bg-accent-fg text-ink" : "text-card-muted")
+                  }
+                  onClick={() => setSpeaker("f")}
+                >
+                  Kobieta
+                </button>
+              </div>
+              <div className="ml-auto flex">
+                <button
+                  type="button"
+                  aria-label="Szukaj"
+                  aria-pressed={searchOpen || Boolean(query)}
+                  onClick={() => setSearchOpen((open) => !open)}
+                  className="grid size-10 place-items-center rounded-md"
+                >
+                  <Search className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={favored ? "Usuń z moich" : "Zapisz w moich"}
+                  onClick={toggleFav}
+                  className="grid size-10 place-items-center rounded-md"
+                >
+                  <Star className="size-5" fill={favored ? "currentColor" : "none"} />
+                </button>
+              </div>
             </div>
-            <p className={"text-center font-medium leading-tight " + (expanded ? "text-6xl" : "text-4xl")}>
+            {searchOpen || query ? (
+              <label className="mt-2 flex h-10 items-center gap-2 rounded-md bg-white/10 px-3">
+                <Search className="size-4 shrink-0 text-card-muted" aria-hidden="true" />
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Szukaj zdania"
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-card-muted"
+                  aria-label="Szukaj zdania"
+                  autoFocus
+                />
+                {query ? (
+                  <button type="button" aria-label="Wyczyść" onClick={() => setQuery("")}>
+                    <X className="size-4 text-card-muted" />
+                  </button>
+                ) : null}
+              </label>
+            ) : null}
+            <p className="mt-3 text-sm text-card-muted">{current.pl}</p>
+            <p className={"mt-2 text-center font-medium leading-tight " + (expanded ? "text-6xl" : "text-5xl")}>
               {spoken.thai}
             </p>
-            <div>
-              <p className="text-center text-base font-medium">Powiedz: {howToSay}</p>
-              <p className="text-center text-sm text-card-muted">{spoken.pron}</p>
-              {current.note ? <p className="mt-2 text-center text-sm text-card-muted">{current.note}</p> : null}
-            </div>
+            <p className="mt-3 text-center text-base font-medium">Powiedz: {howToSay}</p>
+            <p className="text-center text-sm text-card-muted">{spoken.pron}</p>
+            {current.note ? <p className="mt-1 text-center text-sm text-card-muted">{current.note}</p> : null}
           </div>
           <div className="grid grid-cols-3 gap-2 px-3 pb-3">
-            <button type="button" className="h-11 rounded-md bg-surface/10 text-sm font-medium" onClick={() => step(-1)}>
+            <button type="button" className="h-11 rounded-md bg-white/10 text-sm font-medium" onClick={() => step(-1)}>
               Poprzednie
             </button>
             <button
@@ -244,7 +261,7 @@ export function Phrasebook() {
               <Volume2 className="size-4" aria-hidden="true" />
               {playing === spoken.thai ? "Stop" : "Posłuchaj"}
             </button>
-            <button type="button" className="h-11 rounded-md bg-surface/10 text-sm font-medium" onClick={() => step(1)}>
+            <button type="button" className="h-11 rounded-md bg-white/10 text-sm font-medium" onClick={() => step(1)}>
               Następne
             </button>
             <button
@@ -258,7 +275,7 @@ export function Phrasebook() {
           </div>
         </section>
 
-        <section className={"min-h-0 flex-1 overflow-y-auto bg-bg " + (expanded ? "hidden md:block" : "")}>
+        <section className={expanded ? "hidden md:block md:min-h-0 md:flex-1 md:overflow-y-auto" : "md:min-h-0 md:flex-1 md:overflow-y-auto"}>
           <WordCoach key={current.id + speaker} phrase={current} speaker={speaker} />
           {visible.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted">
@@ -283,18 +300,18 @@ export function Phrasebook() {
                       type="button"
                       onClick={() => openPhrase(phrase)}
                       className={
-                        "flex w-full items-center gap-3 border-b border-line px-4 py-3 text-left " +
+                        "flex w-full items-center gap-3 border-b border-line px-4 py-3.5 text-left " +
                         (active ? "bg-accent text-accent-fg" : "bg-surface")
                       }
                     >
                       <span className="min-w-0 flex-1">
                         <span className="block text-base font-medium">{phrase.pl}</span>
-                        <span className={"block truncate text-sm " + (active ? "text-accent-fg/80" : "text-muted")}>
+                        <span className={"block text-sm " + (active ? "text-accent-fg/80" : "text-muted")}>
                           {sayLine(phrase, speaker)}
                         </span>
                       </span>
                       {q ? (
-                        <span className={"text-xs " + (active ? "text-accent-fg/80" : "text-muted")}>
+                        <span className={"shrink-0 text-xs " + (active ? "text-accent-fg/80" : "text-muted")}>
                           {phrase.categoryName}
                         </span>
                       ) : null}
@@ -326,39 +343,41 @@ export function Phrasebook() {
             );
           })}
         </div>
-      ) : null}
+      ) : (
+        <>
+          <div className="flex items-center gap-3 overflow-x-auto border-t border-line bg-bg px-3 py-1 text-xs text-muted">
+            {joins.map((item) => (
+              <button
+                key={item.pl}
+                type="button"
+                onClick={() => playThai(item.th)}
+                className="shrink-0"
+                title={item.gloss}
+              >
+                <span className="font-medium text-ink">{item.pl}</span> {item.th} {item.say}
+              </button>
+            ))}
+          </div>
 
-      <div className="flex items-center gap-3 overflow-x-auto border-t border-line bg-bg px-3 py-1 text-xs text-muted">
-        {joins.map((item) => (
-          <button
-            key={item.pl}
-            type="button"
-            onClick={() => playThai(item.th)}
-            className="shrink-0"
-            title={item.gloss}
-          >
-            <span className="font-medium text-ink">{item.pl}</span> {item.th} {item.say}
-          </button>
-        ))}
-      </div>
-
-      <nav className="flex gap-1 overflow-x-auto border-t border-line bg-surface px-2 py-2">
-        <DockButton
-          label="Moje"
-          active={categoryId === "moje" && !q}
-          onClick={() => selectCategory("moje")}
-          icon={Star}
-        />
-        {categories.map((category) => (
-          <DockButton
-            key={category.id}
-            label={category.name}
-            active={categoryId === category.id && !q}
-            onClick={() => selectCategory(category.id)}
-            icon={ICONS[category.id] ?? Zap}
-          />
-        ))}
-      </nav>
+          <nav className="flex gap-1 overflow-x-auto border-t border-line bg-surface px-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-1">
+            <DockButton
+              label="Moje"
+              active={categoryId === "moje" && !q}
+              onClick={() => selectCategory("moje")}
+              icon={Star}
+            />
+            {categories.map((category) => (
+              <DockButton
+                key={category.id}
+                label={category.name}
+                active={categoryId === category.id && !q}
+                onClick={() => selectCategory(category.id)}
+                icon={ICONS[category.id] ?? Zap}
+              />
+            ))}
+          </nav>
+        </>
+      )}
     </main>
   );
 }
@@ -422,7 +441,7 @@ function WordCoach({ phrase, speaker }: { phrase: Phrase; speaker: Speaker }) {
   const word = words[index];
   if (!word) return null;
   return (
-    <div className="sticky top-0 z-10 border-b border-line bg-surface px-3 py-3">
+    <div className="border-b border-line bg-surface px-3 py-3">
       <p className="text-xs font-medium text-muted">Jak powiedzieć — stuknij słowo</p>
       <div className="mt-2 flex gap-2 overflow-x-auto">
         {words.map((item, i) => (
@@ -463,7 +482,7 @@ function DockButton({
       type="button"
       onClick={onClick}
       className={
-        "flex h-14 min-w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium " +
+        "flex h-12 min-w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium " +
         (active ? "bg-accent text-accent-fg" : "text-muted")
       }
     >
