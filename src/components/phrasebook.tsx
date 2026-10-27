@@ -4,7 +4,9 @@ import {
   Car,
   Hash,
   HeartPulse,
+  MessageCircleReply,
   MessageSquare,
+  Mic,
   Search,
   ShoppingBag,
   Star,
@@ -17,6 +19,9 @@ import {
 import { categories, renderPhrase, type Category, type Phrase, type Speaker } from "@/data/phrases";
 import { coachWords, joins, sayLine } from "@/data/words";
 import { onPlayError, onPlaying, playThai } from "@/lib/play-thai";
+import { normalizePolish } from "@/lib/speech/intent";
+import { useListener } from "@/lib/speech/use-listener";
+import { ListenPanel } from "@/components/listen-panel";
 
 const SPEAKER_KEY = "powiedz-speaker";
 const FAV_KEY = "powiedz-favs";
@@ -24,6 +29,7 @@ const LAST_KEY = "powiedz-last";
 
 const ICONS: Record<string, typeof Zap> = {
   szybkie: Zap,
+  odpowiedzi: MessageCircleReply,
   jedzenie: Utensils,
   kierunki: Waypoints,
   transport: Car,
@@ -50,6 +56,20 @@ function speakThai(text: string) {
   playThai(text);
 }
 
+/** Mniejsza czcionka dla długich zdań, żeby karta nie rozjeżdżała się na pół ekranu. */
+function thaiSize(text: string, expanded: boolean) {
+  const length = [...text].length;
+  if (expanded)
+    return length > 28
+      ? "text-4xl md:text-5xl"
+      : length > 16
+        ? "text-5xl md:text-6xl"
+        : "text-6xl md:text-7xl";
+  return length > 28 ? "text-3xl" : length > 16 ? "text-4xl" : "text-5xl";
+}
+
+type WakeLock = { release: () => Promise<void> };
+
 export function Phrasebook() {
   const pool = useMemo(allPhrases, []);
   const [speaker, setSpeaker] = useState<Speaker>("m");
@@ -63,9 +83,39 @@ export function Phrasebook() {
   const [playError, setPlayError] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  const dock = useRef<HTMLElement>(null);
+  const swipe = useRef<{ x: number; y: number } | null>(null);
+  const listener = useListener();
 
   useEffect(() => onPlaying(setPlaying), []);
   useEffect(() => onPlayError(setPlayError), []);
+
+  useEffect(() => {
+    if (!playError) return;
+    const timer = window.setTimeout(() => setPlayError(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [playError]);
+
+  // „Pokaż osobie”: ekran nie gaśnie, kiedy rozmówca czyta.
+  useEffect(() => {
+    if (!expanded) return;
+    let lock: WakeLock | null = null;
+    let cancelled = false;
+    const nav = navigator as Navigator & {
+      wakeLock?: { request(type: "screen"): Promise<WakeLock> };
+    };
+    nav.wakeLock
+      ?.request("screen")
+      .then((value) => {
+        if (cancelled) void value.release();
+        else lock = value;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      void lock?.release().catch(() => undefined);
+    };
+  }, [expanded]);
 
   useEffect(() => {
     const savedSpeaker = localStorage.getItem(SPEAKER_KEY);
@@ -103,7 +153,10 @@ export function Phrasebook() {
   }, [favs, hydrated]);
 
   const favoritePhrases = useMemo(
-    () => favs.map((id) => pool.find((phrase) => phrase.id === id)).filter((phrase): phrase is Located => Boolean(phrase)),
+    () =>
+      favs
+        .map((id) => pool.find((phrase) => phrase.id === id))
+        .filter((phrase): phrase is Located => Boolean(phrase)),
     [favs, pool],
   );
 
@@ -112,15 +165,22 @@ export function Phrasebook() {
       ? { id: "moje", name: "Moje", phrases: favoritePhrases }
       : (categories.find((category) => category.id === categoryId) ?? categories[0]);
 
-  const q = query.trim().toLowerCase();
+  // Szukanie bez ogonków („dziekuje” znajdzie „Dziękuję”); to samo zdanie z kilku sekcji
+  // pokazujemy raz.
+  const q = normalizePolish(query);
   const visible: Located[] = q
-    ? pool.filter(
-        (phrase) =>
-          phrase.pl.toLowerCase().includes(q) ||
-          sayLine(phrase, speaker).toLowerCase().includes(q) ||
+    ? pool.filter((phrase, index) => {
+        const hit =
+          normalizePolish(phrase.pl).includes(q) ||
+          normalizePolish(sayLine(phrase, speaker)).includes(q) ||
           phrase.th.replaceAll("{p}", "").includes(query.trim()) ||
-          phrase.categoryName.toLowerCase().includes(q),
-      )
+          normalizePolish(phrase.categoryName).includes(q) ||
+          normalizePolish(phrase.note ?? "").includes(q);
+        return (
+          hit &&
+          pool.findIndex((other) => other.pl === phrase.pl && other.th === phrase.th) === index
+        );
+      })
     : activeCategory.phrases.map((phrase) => ({
         ...phrase,
         categoryId: activeCategory.id,
@@ -143,7 +203,10 @@ export function Phrasebook() {
     setQuery("");
     setSearchOpen(false);
     setCategoryId(id);
-    const list = id === "moje" ? favoritePhrases : (categories.find((category) => category.id === id)?.phrases ?? []);
+    const list =
+      id === "moje"
+        ? favoritePhrases
+        : (categories.find((category) => category.id === id)?.phrases ?? []);
     const first = list[0];
     if (!first) return;
     setPhraseId(first.id);
@@ -153,13 +216,56 @@ export function Phrasebook() {
 
   function step(delta: number) {
     if (visible.length === 0) return;
-    const index = Math.max(0, visible.findIndex((phrase) => phrase.id === current.id));
-    const next = visible[(index + delta + visible.length) % visible.length];
+    const index = visible.findIndex((phrase) => phrase.id === current.id);
+    // Bieżącego zdania nie ma na liście (np. po zmianie wyszukiwania) — zaczynamy od brzegu.
+    const next =
+      index === -1
+        ? visible[delta > 0 ? 0 : visible.length - 1]
+        : visible[(index + delta + visible.length) % visible.length];
     openPhrase(next);
   }
 
+  function openById(id: string) {
+    const phrase = pool.find((item) => item.id === id);
+    if (!phrase) return;
+    setQuery("");
+    setSearchOpen(false);
+    setExpanded(false);
+    openPhrase(phrase);
+  }
+
+  const stepRef = useRef(step);
+  stepRef.current = step;
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable]")) {
+        if (event.key === "Escape") (target as HTMLElement).blur();
+        return;
+      }
+      if (event.key === "ArrowRight") stepRef.current(1);
+      else if (event.key === "ArrowLeft") stepRef.current(-1);
+      else if (event.key === "Escape") {
+        setExpanded(false);
+        setSearchOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Aktywna sekcja w dolnym pasku zawsze widoczna, nawet gdy pasek jest przewinięty.
+  useEffect(() => {
+    dock.current
+      ?.querySelector<HTMLElement>("[aria-current='page']")
+      ?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [categoryId, hydrated]);
+
   function toggleFav() {
-    setFavs((prev) => (prev.includes(current.id) ? prev.filter((id) => id !== current.id) : [current.id, ...prev]));
+    setFavs((prev) =>
+      prev.includes(current.id) ? prev.filter((id) => id !== current.id) : [current.id, ...prev],
+    );
   }
 
   let lastGroup = "";
@@ -176,14 +282,29 @@ export function Phrasebook() {
         <section
           className={
             "flex shrink-0 flex-col bg-card text-card-fg " +
-            (expanded ? "min-h-0 flex-1" : "md:w-[46%] md:overflow-y-auto")
+            (expanded ? "min-h-0 flex-1 justify-center" : "md:w-[46%] md:overflow-y-auto")
           }
+          onTouchStart={(event) => {
+            const touch = event.touches[0];
+            swipe.current = { x: touch.clientX, y: touch.clientY };
+          }}
+          onTouchEnd={(event) => {
+            const start = swipe.current;
+            swipe.current = null;
+            if (!start) return;
+            const touch = event.changedTouches[0];
+            const dx = touch.clientX - start.x;
+            const dy = touch.clientY - start.y;
+            // Przesunięcie palcem po karcie = poprzednie / następne zdanie.
+            if (Math.abs(dx) > 60 && Math.abs(dy) < 40) step(dx < 0 ? 1 : -1);
+          }}
         >
           <div key={current.id + speaker} className="phrase-in px-4 pt-3 pb-2">
-            <div className="flex items-center gap-2">
-              <div className="flex rounded-md bg-white/10 p-0.5">
+            <div className={"flex items-center gap-2 " + (expanded ? "hidden" : "")}>
+              <div className="flex rounded-md bg-white/10 p-0.5" role="group" aria-label="Kto mówi">
                 <button
                   type="button"
+                  aria-pressed={speaker === "m"}
                   className={
                     "h-8 rounded-sm px-2.5 text-xs font-medium " +
                     (speaker === "m" ? "bg-accent-fg text-ink" : "text-card-muted")
@@ -194,6 +315,7 @@ export function Phrasebook() {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={speaker === "f"}
                   className={
                     "h-8 rounded-sm px-2.5 text-xs font-medium " +
                     (speaker === "f" ? "bg-accent-fg text-ink" : "text-card-muted")
@@ -204,6 +326,26 @@ export function Phrasebook() {
                 </button>
               </div>
               <div className="ml-auto flex">
+                <button
+                  type="button"
+                  aria-label={listener.status === "off" ? "Słuchaj rozmowy" : "Wyłącz słuchanie"}
+                  aria-pressed={listener.status !== "off"}
+                  onClick={() => (listener.status === "off" ? listener.open() : listener.stop())}
+                  className={
+                    "relative grid size-10 place-items-center rounded-md " +
+                    (listener.status === "listening" || listener.status === "loading"
+                      ? "bg-red-500/20 text-red-200"
+                      : "")
+                  }
+                >
+                  <Mic className="size-5" />
+                  {listener.status === "listening" ? (
+                    <span
+                      className="absolute top-2 right-2 size-2 animate-pulse rounded-full bg-red-400"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                </button>
                 <button
                   type="button"
                   aria-label="Szukaj"
@@ -242,26 +384,43 @@ export function Phrasebook() {
               </label>
             ) : null}
             <p className="mt-3 text-sm text-card-muted">{current.pl}</p>
-            <p className={"mt-2 text-center font-medium leading-tight " + (expanded ? "text-6xl" : "text-5xl")}>
+            <p
+              lang="th"
+              className={
+                "mt-2 text-center font-medium leading-tight text-balance " +
+                thaiSize(spoken.thai, expanded)
+              }
+            >
               {spoken.thai}
             </p>
             <p className="mt-3 text-center text-base font-medium">Powiedz: {howToSay}</p>
             <p className="text-center text-sm text-card-muted">{spoken.pron}</p>
-            {current.note ? <p className="mt-1 text-center text-sm text-card-muted">{current.note}</p> : null}
+            {current.note ? (
+              <p className="mt-1 text-center text-sm text-card-muted">{current.note}</p>
+            ) : null}
           </div>
           <div className="grid grid-cols-3 gap-2 px-3 pb-3">
-            <button type="button" className="h-11 rounded-md bg-white/10 text-sm font-medium" onClick={() => step(-1)}>
+            <button
+              type="button"
+              className="h-11 rounded-md bg-white/10 text-sm font-medium"
+              onClick={() => step(-1)}
+            >
               Poprzednie
             </button>
             <button
               type="button"
+              aria-label={playing === spoken.thai ? "Zatrzymaj nagranie" : "Posłuchaj po tajsku"}
               className="flex h-11 items-center justify-center gap-2 rounded-md bg-accent-fg text-sm font-medium text-ink"
               onClick={() => playThai(spoken.thai)}
             >
               <Volume2 className="size-4" aria-hidden="true" />
               {playing === spoken.thai ? "Stop" : "Posłuchaj"}
             </button>
-            <button type="button" className="h-11 rounded-md bg-white/10 text-sm font-medium" onClick={() => step(1)}>
+            <button
+              type="button"
+              className="h-11 rounded-md bg-white/10 text-sm font-medium"
+              onClick={() => step(1)}
+            >
               Następne
             </button>
             <button
@@ -271,11 +430,21 @@ export function Phrasebook() {
             >
               {expanded ? "Wróć do listy" : "Pokaż osobie — cały ekran"}
             </button>
-            {playError ? <p className="col-span-3 text-center text-xs text-card-muted">{playError}</p> : null}
+            {playError ? (
+              <p role="status" className="col-span-3 text-center text-xs text-card-muted">
+                {playError}
+              </p>
+            ) : null}
           </div>
         </section>
 
-        <section className={expanded ? "hidden md:block md:min-h-0 md:flex-1 md:overflow-y-auto" : "md:min-h-0 md:flex-1 md:overflow-y-auto"}>
+        <section
+          className={
+            expanded
+              ? "hidden md:block md:min-h-0 md:flex-1 md:overflow-y-auto"
+              : "md:min-h-0 md:flex-1 md:overflow-y-auto"
+          }
+        >
           <WordCoach key={current.id + speaker} phrase={current} speaker={speaker} />
           {visible.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted">
@@ -284,7 +453,12 @@ export function Phrasebook() {
                 : "Nic nie pasuje. Spróbuj innego słowa."}
             </p>
           ) : categoryId === "liczby" && !q ? (
-            <NumberPad phrases={visible} currentId={current.id} speaker={speaker} onPick={openPhrase} />
+            <NumberPad
+              phrases={visible}
+              currentId={current.id}
+              speaker={speaker}
+              onPick={openPhrase}
+            />
           ) : (
             <ul>
               {visible.map((phrase) => {
@@ -294,7 +468,9 @@ export function Phrasebook() {
                 return (
                   <li key={phrase.id + phrase.categoryId}>
                     {showGroup ? (
-                      <p className="px-4 pt-4 pb-1 text-xs font-medium tracking-wide text-muted">{phrase.group}</p>
+                      <p className="px-4 pt-4 pb-1 text-xs font-medium tracking-wide text-muted">
+                        {phrase.group}
+                      </p>
                     ) : null}
                     <button
                       type="button"
@@ -306,12 +482,20 @@ export function Phrasebook() {
                     >
                       <span className="min-w-0 flex-1">
                         <span className="block text-base font-medium">{phrase.pl}</span>
-                        <span className={"block text-sm " + (active ? "text-accent-fg/80" : "text-muted")}>
+                        <span
+                          className={
+                            "block text-sm " + (active ? "text-accent-fg/80" : "text-muted")
+                          }
+                        >
                           {sayLine(phrase, speaker)}
                         </span>
                       </span>
                       {q ? (
-                        <span className={"shrink-0 text-xs " + (active ? "text-accent-fg/80" : "text-muted")}>
+                        <span
+                          className={
+                            "shrink-0 text-xs " + (active ? "text-accent-fg/80" : "text-muted")
+                          }
+                        >
                           {phrase.categoryName}
                         </span>
                       ) : null}
@@ -323,6 +507,15 @@ export function Phrasebook() {
           )}
         </section>
       </div>
+
+      {expanded ? null : (
+        <ListenPanel
+          listener={listener}
+          speaker={speaker}
+          onOpenPhrase={openById}
+          onOpenCategory={selectCategory}
+        />
+      )}
 
       {expanded ? (
         <div className="flex gap-2 overflow-x-auto border-t border-line bg-surface px-2 py-2 md:hidden">
@@ -359,7 +552,11 @@ export function Phrasebook() {
             ))}
           </div>
 
-          <nav className="flex gap-1 overflow-x-auto border-t border-line bg-surface px-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-1">
+          <nav
+            ref={dock}
+            aria-label="Sekcje"
+            className="flex gap-1 overflow-x-auto border-t border-line bg-surface px-1 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-1"
+          >
             <DockButton
               label="Moje"
               active={categoryId === "moje" && !q}
@@ -406,7 +603,9 @@ function NumberPad({
         const wide = chunk.items.some((item) => item.pl.length > 2);
         return (
           <div key={chunk.group} className="mb-4">
-            {chunk.group ? <p className="pb-2 text-xs font-medium tracking-wide text-muted">{chunk.group}</p> : null}
+            {chunk.group ? (
+              <p className="pb-2 text-xs font-medium tracking-wide text-muted">{chunk.group}</p>
+            ) : null}
             <div className={"grid gap-2 " + (wide ? "grid-cols-4" : "grid-cols-5")}>
               {chunk.items.map((phrase) => {
                 const active = phrase.id === currentId;
@@ -421,7 +620,12 @@ function NumberPad({
                     }
                   >
                     <span className="text-lg font-medium leading-none">{phrase.pl}</span>
-                    <span className={"mt-1 max-w-full truncate text-xs " + (active ? "text-accent-fg/80" : "text-muted")}>
+                    <span
+                      className={
+                        "mt-1 max-w-full truncate text-xs " +
+                        (active ? "text-accent-fg/80" : "text-muted")
+                      }
+                    >
                       {sayLine(phrase, speaker)}
                     </span>
                   </button>
@@ -453,11 +657,17 @@ function WordCoach({ phrase, speaker }: { phrase: Phrase; speaker: Speaker }) {
               speakThai(item.th);
             }}
             className={
-              "h-14 shrink-0 rounded-md px-3 text-left " + (i === index ? "bg-accent text-accent-fg" : "bg-bg text-ink")
+              "h-14 shrink-0 rounded-md px-3 text-left " +
+              (i === index ? "bg-accent text-accent-fg" : "bg-bg text-ink")
             }
           >
             <span className="block text-sm font-medium">{item.say}</span>
-            <span className={"block text-xs " + (i === index ? "text-accent-fg/80" : "text-muted")}>{item.th}</span>
+            <span
+              lang="th"
+              className={"block text-xs " + (i === index ? "text-accent-fg/80" : "text-muted")}
+            >
+              {item.th}
+            </span>
           </button>
         ))}
       </div>
@@ -481,6 +691,7 @@ function DockButton({
     <button
       type="button"
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       className={
         "flex h-12 min-w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-2 text-xs font-medium " +
         (active ? "bg-accent text-accent-fg" : "text-muted")

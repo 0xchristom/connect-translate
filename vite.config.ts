@@ -142,6 +142,37 @@ function authPopupPlugin(): Plugin {
   };
 }
 
+/**
+ * The speech worker self-hosts ONNX Runtime's plain WASM build (14 MB). onnxruntime-web
+ * also references its asyncify variant via `new URL(..., import.meta.url)`, so Vite emits
+ * that 27 MB file too — unused at runtime, and over Cloudflare's 25 MiB per-asset limit.
+ */
+function dropUnusedOrtWasm(): Plugin {
+  return {
+    name: "powiedz:drop-unused-ort-wasm",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      for (const name of Object.keys(bundle)) {
+        if (/ort-wasm-simd-threaded\.(asyncify|jsep|jspi)-[\w-]+\.wasm$/.test(name)) delete bundle[name];
+      }
+    },
+  };
+}
+
+/** Dev twin of server/middleware/isolation.ts (multi-threaded speech recognition). */
+function documentIsolationPlugin(): Plugin {
+  return {
+    name: "powiedz:document-isolation",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((_req, res, next) => {
+        res.setHeader("Document-Isolation-Policy", "isolate-and-credentialless");
+        next();
+      });
+    },
+  };
+}
+
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
@@ -157,8 +188,16 @@ export default defineConfig(({ command, isPreview }) => ({
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },
+  // Found only once the speech worker starts; pre-bundling avoids a dev reload mid-session.
+  optimizeDeps: { include: ["@huggingface/transformers"] },
+  worker: {
+    // Module worker, so transformers.js can stay a lazily loaded chunk.
+    format: "es",
+    plugins: () => [dropUnusedOrtWasm()],
+  },
   plugins: [
     pgliteBootstrapPlugin(),
+    documentIsolationPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
     // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.
