@@ -17,6 +17,17 @@ async function directory() {
   return root.getDirectoryHandle("models", { create: true });
 }
 
+/** Kasuje wszystkie pliki jednego modelu z Hugging Face (np. żeby zwolnić 3 GB). */
+export async function removeModel(id: string) {
+  const dir = await directory();
+  const marker = "_" + fileName(id) + "_resolve_";
+  const names: string[] = [];
+  // keys() jest w każdej przeglądarce z OPFS, tylko typy TypeScriptu jeszcze go nie znają.
+  const keys = (dir as unknown as { keys(): AsyncIterable<string> }).keys();
+  for await (const name of keys) if (name.includes(marker)) names.push(name);
+  await Promise.all(names.map((name) => dir.removeEntry(name)));
+}
+
 export const opfsCache = {
   async match(key: string) {
     try {

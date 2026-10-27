@@ -14,6 +14,12 @@ describe("politeThai", () => {
     assert.equal(politeThai("ฉันหิวค่ะ", "f", false), "ฉันหิวค่ะ");
   });
 
+  it("keeps only the speaker's particle when the model wrote both", () => {
+    const both = "คุณทำให้เผ็ดน้อยลงได้ไหมคะ/ครับ? ฉันไม่ทานเนื้อค่ะ/ครับ";
+    assert.equal(politeThai(both, "f", true), "คุณทำให้เผ็ดน้อยลงได้ไหมคะ? ฉันไม่ทานเนื้อค่ะ");
+    assert.equal(politeThai(both, "m", true), "คุณทำให้เผ็ดน้อยลงได้ไหมครับ? ผมไม่ทานเนื้อครับ");
+  });
+
   it("follows นะ with the high-tone particle for women", () => {
     assert.equal(politeThai("ขอบคุณนะ", "f", false), "ขอบคุณนะคะ");
   });

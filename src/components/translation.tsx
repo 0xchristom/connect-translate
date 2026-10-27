@@ -5,7 +5,7 @@ import { playThai } from "@/lib/play-thai";
 import { hasThai } from "@/lib/speech/intent";
 import { reading } from "@/lib/speech/reading";
 import type { Lang } from "@/lib/translate/protocol";
-import { OFFLINE_MODEL } from "@/lib/translate/protocol";
+import { GEMMA_MODEL, OFFLINE_MODEL, type Engine } from "@/lib/translate/protocol";
 import { politeThai } from "@/lib/translate/polite";
 import { useLiveTranslation, type Live } from "@/lib/translate/use-live-translation";
 import type { Translator } from "@/lib/translate/use-translator";
@@ -110,16 +110,51 @@ function megabytes(bytes: number) {
   return Math.round(bytes / 1e6);
 }
 
+const ENGINES: { value: Engine; name: string; note: string }[] = [
+  { value: "nllb", name: "NLLB", note: OFFLINE_MODEL.size },
+  { value: "gemma", name: "TranslateGemma", note: GEMMA_MODEL.size + " · eksperyment" },
+];
+
+function EngineChoice({ translator }: { translator: Translator }) {
+  return (
+    <div role="radiogroup" aria-label="Model offline" className="mt-2 grid grid-cols-2 gap-1.5">
+      {ENGINES.map((item) => {
+        const active = translator.engine === item.value;
+        return (
+          <button
+            key={item.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => translator.setEngine(item.value)}
+            className={
+              "rounded-md border px-2.5 py-1.5 text-left " +
+              (active ? "border-accent bg-bg" : "border-line text-muted")
+            }
+          >
+            <span className="block text-sm font-medium text-ink">{item.name}</span>
+            <span className="block text-xs text-muted">{item.note}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function OfflineSetup({ translator }: { translator: Translator }) {
-  const { offline, progress, downloaded } = translator;
+  const { offline, progress, downloaded, engine } = translator;
+  const gemma = engine === "gemma";
   const percent =
     progress && progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : null;
+  let body;
   if (offline === "loading") {
-    return (
+    body = (
       <div className="mt-2">
         <p className="text-xs text-muted">
           {downloaded
-            ? "Uruchamiam tłumacza offline…"
+            ? gemma
+              ? "Uruchamiam TranslateGemma… na telefonie to może potrwać minutę."
+              : "Uruchamiam tłumacza offline…"
             : percent === null
               ? "Łączę się z serwerem modeli…"
               : `Pobieram tłumacza offline… ${percent}% (${megabytes(progress!.loaded)} z ${megabytes(progress!.total)} MB)`}
@@ -137,43 +172,70 @@ function OfflineSetup({ translator }: { translator: Translator }) {
         </div>
       </div>
     );
-  }
-  if (downloaded) {
-    return (
-      <label className="mt-2 flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
-          className="mt-1"
-          checked={translator.offlineOnly}
-          onChange={(event) => translator.setOfflineOnly(event.target.checked)}
-        />
-        <span>
-          Tłumacz tylko na telefonie
-          <span className="block text-xs text-muted">
-            Nic nie wychodzi do Google. Wolniej i trochę słabiej. Bez tego offline włącza się sam,
-            gdy nie ma internetu.
+  } else if (downloaded) {
+    body = (
+      <>
+        <label className="mt-2 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={translator.offlineOnly}
+            onChange={(event) => translator.setOfflineOnly(event.target.checked)}
+          />
+          <span>
+            Tłumacz tylko na telefonie
+            <span className="block text-xs text-muted">
+              Nic nie wychodzi do Google. Wolniej{gemma ? "" : " i trochę słabiej"}. Bez tego
+              offline włącza się sam, gdy nie ma internetu.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+        {translator.offlineError ? (
+          <p className="mt-1 text-xs text-red-700">{translator.offlineError}</p>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => void translator.removeOffline()}
+          className="mt-1 text-xs text-muted underline"
+        >
+          Usuń ten model z telefonu
+        </button>
+      </>
+    );
+  } else {
+    const blocked = gemma && !translator.webgpu;
+    body = (
+      <div className="mt-2 text-xs text-muted">
+        <p>
+          {gemma
+            ? `TranslateGemma (Google) tłumaczy wyraźnie lepiej, ale to ${GEMMA_MODEL.size} i liczy na karcie graficznej telefonu (WebGPU). Eksperyment: pierwsze uruchomienie trwa długo, telefon się grzeje.`
+            : `NLLB (Meta) tłumaczy na procesorze telefonu: ok. ${OFFLINE_MODEL.size}, pobiera się raz.`}{" "}
+          Najlepiej na Wi-Fi.
+        </p>
+        {blocked ? (
+          <p className="mt-1 text-red-700">
+            Ta przeglądarka nie obsługuje WebGPU — użyj Chrome na Androidzie.
+          </p>
+        ) : null}
+        {translator.offlineError ? (
+          <p className="mt-1 text-red-700">{translator.offlineError}</p>
+        ) : null}
+        <button
+          type="button"
+          disabled={blocked}
+          onClick={() => void translator.downloadOffline().catch(() => {})}
+          className="mt-1.5 h-9 rounded-md border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+        >
+          Pobierz {gemma ? "TranslateGemma" : "tłumacza offline"}
+        </button>
+      </div>
     );
   }
   return (
-    <div className="mt-2 text-xs text-muted">
-      <p>
-        Bez internetu tłumaczy model NLLB (Meta) na telefonie: ok. {OFFLINE_MODEL.size}, pobiera się
-        raz. Najlepiej na Wi-Fi.
-      </p>
-      {translator.offlineError ? (
-        <p className="mt-1 text-red-700">{translator.offlineError}</p>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => void translator.downloadOffline().catch(() => {})}
-        className="mt-1.5 h-9 rounded-md border border-line px-3 text-sm font-medium text-ink"
-      >
-        Pobierz tłumacza offline
-      </button>
-    </div>
+    <>
+      <EngineChoice translator={translator} />
+      {body}
+    </>
   );
 }
 
