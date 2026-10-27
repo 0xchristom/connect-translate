@@ -170,11 +170,23 @@ export default defineConfig(({ command, isPreview }) => ({
     ...(command === "build" || isPreview
       ? [
           nitro({
-            preset: "vercel",
+            preset: "cloudflare-pages",
             // Auto-registers server/middleware/* (the PWA install page +
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
             serverDir: "./server",
+            cloudflare: {
+              nodeCompat: true,
+              pages: {
+                // One glob per folder. Listing every mp3 exceeds the 100-rule
+                // Cloudflare Pages limit and the rest never get served.
+                defaultRoutes: false,
+                routes: {
+                  include: ["/*"],
+                  exclude: ["/assets/*", "/audio/*", "/favicon.svg", "/og.jpg", "/__grok/*"],
+                },
+              },
+            },
           }),
         ]
       : []),
