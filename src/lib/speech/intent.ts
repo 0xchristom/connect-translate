@@ -157,7 +157,7 @@ export function extractNumbers(text: string) {
   return [...new Set(found)];
 }
 
-const DIGIT_SAY = ["", "nung", "song", "sam", "si", "ha", "hok", "dżet", "pet", "gao"];
+const DIGIT_SAY = ["", "nyng", "song", "sam", "si", "ha", "hok", "dżet", "peet", "gao"];
 const DIGIT_TH = ["", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"];
 const PLACES = [
   { value: 100000, th: "แสน", say: "saen" },
@@ -217,6 +217,13 @@ function matchesPolishCue(text: string, pattern: string) {
   return (" " + text).includes(" " + pattern);
 }
 
+const GENDERED = /\{([^|{}]*)\|([^|{}]*)\}/g;
+
+/** „Zgubił{em|am} się” → „Zgubiłem/am się”: matcher nie wie, kto mówi. */
+function plainPolish(pl: string) {
+  return pl.replace(GENDERED, "$1/$2");
+}
+
 export function createMatcher(categories: Category[], cues: Cue[], hallucinations: string[] = []) {
   const byId = new Map<string, Indexed>();
   // Ta sama fraza bywa w kilku sekcjach; do porównań zostaje wersja z sekcji tematycznej,
@@ -229,13 +236,13 @@ export function createMatcher(categories: Category[], cues: Cue[], hallucination
   for (const category of ordered) {
     for (const phrase of category.phrases) {
       const thaiKey = stripParticles(normalizeThai(phrase.th.replaceAll("{p}", "")));
-      const plKey = normalizePolish(phrase.pl);
+      const plKey = normalizePolish(phrase.pl.replace(GENDERED, "$1"));
       const indexed = {
         ...phrase,
         categoryId: category.id,
         thaiKey,
         plKey,
-        plWords: stems(phrase.pl),
+        plWords: stems(phrase.pl.replace(GENDERED, "$1 $2")),
       };
       byId.set(phrase.id, indexed);
       if (seen.has(thaiKey + "|" + plKey)) continue;
@@ -287,7 +294,7 @@ export function createMatcher(categories: Category[], cues: Cue[], hallucination
       // a jako sugestie — odpowiedzi ze wskazówek, nie samo pytanie.
       const exact = direct[0] && (direct[0].score >= 0.8 || hits.length === 0) ? direct[0] : null;
       if (exact) {
-        meaning = "„" + exact.phrase.pl + "”";
+        meaning = "„" + plainPolish(exact.phrase.pl) + "”";
         confidence = exact.score;
         if (!exact.phrase.question || hits.length === 0) add([exact.phrase.id]);
       }
@@ -339,7 +346,7 @@ export function createMatcher(categories: Category[], cues: Cue[], hallucination
 
       const best = direct[0];
       if (best) {
-        meaning = "Chcesz powiedzieć: „" + best.phrase.pl + "”";
+        meaning = "Chcesz powiedzieć: „" + plainPolish(best.phrase.pl) + "”";
         categoryId = best.phrase.categoryId;
         group = best.phrase.group ?? null;
         confidence = best.score;

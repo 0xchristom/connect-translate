@@ -1,5 +1,5 @@
 import { ArrowRight, Check, Loader2, Mic, MicOff, Volume2, X } from "lucide-react";
-import { categories, renderPhrase, type Speaker } from "@/data/phrases";
+import { categories, polish, renderPhrase, type Speaker } from "@/data/phrases";
 import { sayLine } from "@/data/words";
 import { playThai } from "@/lib/play-thai";
 import { MODELS } from "@/lib/speech/asr-protocol";
@@ -346,14 +346,14 @@ function ReplyChip({
         onClick={() => onOpenPhrase(id)}
         className="min-w-0 flex-1 px-2.5 py-2 text-left"
       >
-        <span className="block truncate text-sm font-medium">{phrase.pl}</span>
+        <span className="block truncate text-sm font-medium">{polish(phrase, speaker)}</span>
         {compact ? null : (
           <span className="block truncate text-xs text-muted">{sayLine(phrase, speaker)}</span>
         )}
       </button>
       <button
         type="button"
-        aria-label={"Posłuchaj: " + phrase.pl}
+        aria-label={"Posłuchaj: " + polish(phrase, speaker)}
         onClick={() => playThai(thai)}
         className="grid w-9 shrink-0 place-items-center text-muted"
       >

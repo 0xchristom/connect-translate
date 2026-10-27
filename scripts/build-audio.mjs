@@ -17,6 +17,7 @@ for (const category of categories) {
       texts.add(renderPhrase(phrase, speaker).thai);
       for (const word of coachWords(phrase, speaker)) texts.add(word.th);
     }
+    for (const answer of phrase.answers ?? []) texts.add(answer.th);
   }
 }
 

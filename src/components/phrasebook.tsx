@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BedDouble,
   Car,
+  Delete,
   Hash,
   HeartPulse,
   MessageCircleReply,
@@ -16,10 +17,18 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { categories, renderPhrase, type Category, type Phrase, type Speaker } from "@/data/phrases";
+import {
+  categories,
+  polish,
+  renderPhrase,
+  type Answer,
+  type Category,
+  type Phrase,
+  type Speaker,
+} from "@/data/phrases";
 import { coachWords, joins, sayLine } from "@/data/words";
 import { onPlayError, onPlaying, playThai } from "@/lib/play-thai";
-import { normalizePolish } from "@/lib/speech/intent";
+import { normalizePolish, sayNumber } from "@/lib/speech/intent";
 import { useListener } from "@/lib/speech/use-listener";
 import { ListenPanel } from "@/components/listen-panel";
 
@@ -52,6 +61,21 @@ function allPhrases(): Located[] {
   );
 }
 
+/**
+ * To samo zdanie stoi w kilku sekcjach pod różnymi id („Dziękuję” w Szybkich i w Grzeczności).
+ * Ulubione zapisujemy pod pierwszym id, żeby gwiazdka była wszędzie taka sama.
+ */
+function canonicalIds(pool: Located[]) {
+  const first = new Map<string, string>();
+  const canonical = new Map<string, string>();
+  for (const phrase of pool) {
+    const key = phrase.th + "|" + phrase.pl;
+    if (!first.has(key)) first.set(key, phrase.id);
+    canonical.set(phrase.id, first.get(key)!);
+  }
+  return canonical;
+}
+
 function speakThai(text: string) {
   playThai(text);
 }
@@ -72,6 +96,8 @@ type WakeLock = { release: () => Promise<void> };
 
 export function Phrasebook() {
   const pool = useMemo(allPhrases, []);
+  const canonical = useMemo(() => canonicalIds(pool), [pool]);
+  const favId = (id: string) => canonical.get(id) ?? id;
   const [speaker, setSpeaker] = useState<Speaker>("m");
   const [favs, setFavs] = useState<string[]>([]);
   const [categoryId, setCategoryId] = useState("szybkie");
@@ -125,7 +151,8 @@ export function Phrasebook() {
       try {
         const parsed = JSON.parse(savedFavs) as unknown;
         if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
-          setFavs(parsed);
+          const ids = parsed.map((id) => canonical.get(id) ?? id);
+          setFavs(ids.filter((id, index) => ids.indexOf(id) === index));
         }
       } catch {
         /* ignore broken storage */
@@ -140,7 +167,7 @@ export function Phrasebook() {
       }
     }
     setHydrated(true);
-  }, [pool]);
+  }, [pool, canonical]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -171,7 +198,8 @@ export function Phrasebook() {
   const visible: Located[] = q
     ? pool.filter((phrase, index) => {
         const hit =
-          normalizePolish(phrase.pl).includes(q) ||
+          normalizePolish(polish(phrase, "m")).includes(q) ||
+          normalizePolish(polish(phrase, "f")).includes(q) ||
           normalizePolish(sayLine(phrase, speaker)).includes(q) ||
           phrase.th.replaceAll("{p}", "").includes(query.trim()) ||
           normalizePolish(phrase.categoryName).includes(q) ||
@@ -190,7 +218,7 @@ export function Phrasebook() {
   const current = pool.find((phrase) => phrase.id === phraseId) ?? pool[0];
   const spoken = renderPhrase(current, speaker);
   const howToSay = sayLine(current, speaker);
-  const favored = favs.includes(current.id);
+  const favored = favs.includes(favId(current.id));
 
   function openPhrase(phrase: Located) {
     setPhraseId(phrase.id);
@@ -262,10 +290,9 @@ export function Phrasebook() {
       ?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
   }, [categoryId, hydrated]);
 
-  function toggleFav() {
-    setFavs((prev) =>
-      prev.includes(current.id) ? prev.filter((id) => id !== current.id) : [current.id, ...prev],
-    );
+  function toggleFav(phraseId: string) {
+    const id = favId(phraseId);
+    setFavs((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [id, ...prev]));
   }
 
   let lastGroup = "";
@@ -282,7 +309,9 @@ export function Phrasebook() {
         <section
           className={
             "flex shrink-0 flex-col bg-card text-card-fg " +
-            (expanded ? "min-h-0 flex-1 justify-center" : "md:w-[46%] md:overflow-y-auto")
+            (expanded
+              ? "min-h-0 flex-1 justify-center-safe overflow-y-auto"
+              : "md:w-[46%] md:overflow-y-auto")
           }
           onTouchStart={(event) => {
             const touch = event.touches[0];
@@ -358,7 +387,7 @@ export function Phrasebook() {
                 <button
                   type="button"
                   aria-label={favored ? "Usuń z moich" : "Zapisz w moich"}
-                  onClick={toggleFav}
+                  onClick={() => toggleFav(current.id)}
                   className="grid size-10 place-items-center rounded-md"
                 >
                   <Star className="size-5" fill={favored ? "currentColor" : "none"} />
@@ -383,7 +412,7 @@ export function Phrasebook() {
                 ) : null}
               </label>
             ) : null}
-            <p className="mt-3 text-sm text-card-muted">{current.pl}</p>
+            <p className="mt-3 text-sm text-card-muted">{polish(current, speaker)}</p>
             <p
               lang="th"
               className={
@@ -398,6 +427,7 @@ export function Phrasebook() {
             {current.note ? (
               <p className="mt-1 text-center text-sm text-card-muted">{current.note}</p>
             ) : null}
+            <Answers key={current.id} phrase={current} expanded={expanded} />
           </div>
           <div className="grid grid-cols-3 gap-2 px-3 pb-3">
             <button
@@ -449,7 +479,7 @@ export function Phrasebook() {
           {visible.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-muted">
               {categoryId === "moje" && !q
-                ? "Gwiazdka na karcie zapisuje zdanie tutaj, żeby było pod ręką."
+                ? "Stuknij gwiazdkę przy zdaniu na liście, a trafi tutaj — pod ręką na rozmowę."
                 : "Nic nie pasuje. Spróbuj innego słowa."}
             </p>
           ) : categoryId === "liczby" && !q ? (
@@ -472,34 +502,47 @@ export function Phrasebook() {
                         {phrase.group}
                       </p>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() => openPhrase(phrase)}
+                    <div
                       className={
-                        "flex w-full items-center gap-3 border-b border-line px-4 py-3.5 text-left " +
+                        "flex items-stretch border-b border-line " +
                         (active ? "bg-accent text-accent-fg" : "bg-surface")
                       }
                     >
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-base font-medium">{phrase.pl}</span>
-                        <span
-                          className={
-                            "block text-sm " + (active ? "text-accent-fg/80" : "text-muted")
-                          }
-                        >
-                          {sayLine(phrase, speaker)}
+                      <button
+                        type="button"
+                        onClick={() => openPhrase(phrase)}
+                        aria-current={active ? "true" : undefined}
+                        className="flex min-w-0 flex-1 items-center gap-3 py-3.5 pl-4 text-left"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-base font-medium">
+                            {polish(phrase, speaker)}
+                          </span>
+                          <span
+                            className={
+                              "block text-sm " + (active ? "text-accent-fg/80" : "text-muted")
+                            }
+                          >
+                            {sayLine(phrase, speaker)}
+                          </span>
                         </span>
-                      </span>
-                      {q ? (
-                        <span
-                          className={
-                            "shrink-0 text-xs " + (active ? "text-accent-fg/80" : "text-muted")
-                          }
-                        >
-                          {phrase.categoryName}
-                        </span>
-                      ) : null}
-                    </button>
+                        {q ? (
+                          <span
+                            className={
+                              "shrink-0 text-xs " + (active ? "text-accent-fg/80" : "text-muted")
+                            }
+                          >
+                            {phrase.categoryName}
+                          </span>
+                        ) : null}
+                      </button>
+                      <StarButton
+                        on={favs.includes(favId(phrase.id))}
+                        label={polish(phrase, speaker)}
+                        muted={!active}
+                        onClick={() => toggleFav(phrase.id)}
+                      />
+                    </div>
                   </li>
                 );
               })}
@@ -531,7 +574,7 @@ export function Phrasebook() {
                   (active ? "bg-accent text-accent-fg" : "text-ink")
                 }
               >
-                {phrase.pl}
+                {polish(phrase, speaker)}
               </button>
             );
           })}
@@ -599,6 +642,7 @@ function NumberPad({
   }
   return (
     <div className="px-3 py-3">
+      <NumberInput />
       {chunks.map((chunk) => {
         const wide = chunk.items.some((item) => item.pl.length > 2);
         return (
@@ -635,6 +679,197 @@ function NumberPad({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function StarButton({
+  on,
+  label,
+  muted,
+  onClick,
+}: {
+  on: boolean;
+  label: string;
+  muted: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      aria-label={(on ? "Usuń z moich: " : "Zapisz w moich: ") + label}
+      onClick={onClick}
+      className={
+        "grid w-12 shrink-0 place-items-center " +
+        (on ? "text-amber-500" : muted ? "text-muted/60" : "text-accent-fg/70")
+      }
+    >
+      <Star className="size-5" fill={on ? "currentColor" : "none"} aria-hidden="true" />
+    </button>
+  );
+}
+
+/**
+ * Gdy angielski nie działa, odpowiedź też musi przejść przez ekran: rozmówca czyta pytanie
+ * po tajsku i stuka gotową odpowiedź albo wpisuje cenę, a my widzimy ją po polsku.
+ */
+function Answers({ phrase, expanded }: { phrase: Phrase; expanded: boolean }) {
+  const [picked, setPicked] = useState<Answer | null>(null);
+  const [digits, setDigits] = useState("");
+  const answers = phrase.answers ?? [];
+  if (answers.length === 0 && !phrase.price) return null;
+
+  if (!expanded) {
+    return (
+      <div className="mt-3 border-t border-white/10 pt-2">
+        <p className="text-xs text-card-muted">
+          Może odpowiedzieć
+          {phrase.price ? " · cenę wpisze w trybie „Pokaż osobie”" : ""}
+        </p>
+        {answers.length > 0 ? (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {answers.map((answer) => (
+              <button
+                key={answer.th}
+                type="button"
+                onClick={() => playThai(answer.th)}
+                className="rounded-md bg-white/10 px-2 py-1 text-left text-xs"
+              >
+                <span lang="th" className="font-medium">
+                  {answer.th}
+                </span>{" "}
+                <span className="text-card-muted">{answer.pl}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  const amount = Number(digits);
+  const said = digits ? sayNumber(amount) : null;
+  return (
+    <div className="mx-auto mt-5 max-w-md">
+      {/* Pierwsza linijka jest dla rozmówcy, druga dla nas. */}
+      <p lang="th" className="text-center text-lg font-medium">
+        {phrase.price ? "พิมพ์ราคาได้เลย" : "แตะคำตอบได้เลย"}
+      </p>
+      <p className="text-center text-xs text-card-muted">
+        {phrase.price ? "Rozmówca wpisuje cenę" : "Rozmówca stuka odpowiedź"}
+      </p>
+      {answers.length > 0 ? (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {answers.map((answer) => {
+            const active = picked?.th === answer.th;
+            return (
+              <button
+                key={answer.th}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setPicked(answer)}
+                className={
+                  "min-h-14 rounded-md px-2 py-2 text-center " +
+                  (active ? "bg-accent-fg text-ink" : "bg-white/10")
+                }
+              >
+                <span lang="th" className="block text-xl font-medium leading-tight">
+                  {answer.th}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      {picked ? (
+        <p role="status" className="mt-3 text-center text-2xl font-semibold">
+          {picked.pl}
+        </p>
+      ) : null}
+      {phrase.price ? (
+        <div className="mt-3">
+          <p
+            role="status"
+            className="flex h-14 items-center justify-center gap-2 rounded-md bg-white/10 text-3xl font-semibold tabular-nums"
+          >
+            {digits || "–"}
+            <span lang="th" className="text-xl font-medium">
+              บาท
+            </span>
+          </p>
+          {said ? (
+            <p className="mt-1 text-center text-sm text-card-muted">
+              {amount.toLocaleString("pl-PL")} bahtów · {said.say}
+            </p>
+          ) : null}
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "00", "0"].map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setDigits((value) => (value + key).replace(/^0+/, "").slice(0, 6))}
+                className="h-12 rounded-md bg-white/10 text-xl font-medium tabular-nums"
+              >
+                {key}
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-label="Usuń cyfrę"
+              onClick={() => setDigits((value) => value.slice(0, -1))}
+              className="grid h-12 place-items-center rounded-md bg-white/10"
+            >
+              <Delete className="size-5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Ceny rzadko są okrągłe: dowolną kwotę składamy z tajskich słów liczbowych. */
+function NumberInput() {
+  const [digits, setDigits] = useState("");
+  const said = digits ? sayNumber(Number(digits)) : null;
+  const thai = said ? said.th + "บาท" : "";
+  return (
+    <div className="mb-4 rounded-md bg-surface p-3">
+      <label className="block text-xs font-medium text-muted" htmlFor="any-number">
+        Dowolna kwota — wpisz cyfry
+      </label>
+      <input
+        id="any-number"
+        inputMode="numeric"
+        autoComplete="off"
+        value={digits}
+        onChange={(event) =>
+          setDigits(
+            event.target.value
+              .replace(/[^0-9]/g, "")
+              .replace(/^0+/, "")
+              .slice(0, 6),
+          )
+        }
+        placeholder="np. 350"
+        className="mt-1 h-11 w-full rounded-md border border-line bg-bg px-3 text-lg tabular-nums outline-none focus:border-accent"
+      />
+      {said ? (
+        <button
+          type="button"
+          onClick={() => playThai(thai)}
+          className="mt-2 flex w-full items-center gap-3 rounded-md bg-bg px-3 py-2 text-left"
+        >
+          <Volume2 className="size-4 shrink-0 text-muted" aria-hidden="true" />
+          <span className="min-w-0">
+            <span className="block text-base font-medium">{said.say} bat</span>
+            <span lang="th" className="block text-sm text-muted">
+              {thai}
+            </span>
+          </span>
+        </button>
+      ) : null}
     </div>
   );
 }
