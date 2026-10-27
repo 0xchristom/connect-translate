@@ -1,7 +1,5 @@
-# GitHub → Cloudflare Pages
-# Build command: npm run build
-# Output directory: dist
+# Cloudflare reads this, then Nitro points deploy at the built worker.
+# Dashboard deploy command: npx wrangler deploy
 name = "powiedz-to"
-pages_build_output_dir = "dist"
 compatibility_date = "2026-10-27"
 compatibility_flags = ["nodejs_compat"]
