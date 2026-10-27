@@ -29,6 +29,9 @@ async function load(model: string) {
     const { pipeline, env } = await import("@huggingface/transformers");
     env.allowLocalModels = false;
     env.useBrowserCache = true;
+    // Hugging Face odpowiada 404 bez CORS na każde zapytanie z Refererem *.workers.dev,
+    // więc na wdrożonej aplikacji żaden model się nie pobierał. Bez Referera przechodzi.
+    env.fetch = (input, init) => fetch(input, { ...init, referrerPolicy: "no-referrer" });
     // Środowisko ONNX z własnego serwera, nie z CDN: ta sama wersja co biblioteka, działa
     // offline i nic nie wychodzi do obcych domen. Wariant bez WebGPU/asyncify (14 MB zamiast 27),
     // bo i tak liczymy na WASM.

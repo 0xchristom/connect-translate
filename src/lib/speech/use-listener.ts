@@ -174,9 +174,10 @@ export function useListener() {
       } else if (message.type === "error") {
         inFlight.current = false;
         setBusy(false);
+        // Techniczny powód w nawiasie — bez niego nie da się zdiagnozować problemu z telefonu.
         setError(
           message.id === undefined
-            ? "Nie udało się pobrać modelu mowy. Sprawdź internet i spróbuj jeszcze raz."
+            ? `Nie udało się pobrać modelu mowy. Sprawdź internet i spróbuj jeszcze raz. (${message.message})`
             : "Nie udało się rozpoznać ostatniej wypowiedzi.",
         );
         if (message.id === undefined) {
