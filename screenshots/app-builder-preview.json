@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Powiedz to",
+      "hasCanvas": false,
+      "bodyTextLen": 955,
+      "bodyTextHash": "3cfaf3642ff847c31c663346f1adca728e77b36056f92ddc16877ff26eeceeeb",
+      "bodyTextPrefix": "Powiedz to Mężczyzna Kobieta Cześć สวัสดีครับ Powiedz: sa-wat-di",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Powiedz to",
+      "hasCanvas": false,
+      "bodyTextLen": 955,
+      "bodyTextHash": "3cfaf3642ff847c31c663346f1adca728e77b36056f92ddc16877ff26eeceeeb",
+      "bodyTextPrefix": "Powiedz to Mężczyzna Kobieta Cześć สวัสดีครับ Powiedz: sa-wat-di",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}
