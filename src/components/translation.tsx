@@ -306,15 +306,15 @@ export function TranslatePanel({
           ) : null}
         </div>
       ) : null}
-      <details className="mt-3 border-t border-line pt-2">
-        <summary className="cursor-pointer text-xs font-medium text-muted">
-          Bez internetu{translator.downloaded ? " · tłumacz offline pobrany" : ""}
-        </summary>
-        <OfflineSetup translator={translator} />
-        <p className="mt-2 text-xs text-muted">
-          Z internetem tekst (nie nagranie) idzie do Google Tłumacza.
+      <div className="mt-3 border-t border-line pt-2">
+        <p className="text-xs font-medium text-ink">
+          Model bez internetu
+          <span className="font-normal text-muted">
+            {translator.downloaded ? " · pobrany" : " · z internetem tłumaczy Google"}
+          </span>
         </p>
-      </details>
+        <OfflineSetup translator={translator} />
+      </div>
     </section>
   );
 }
