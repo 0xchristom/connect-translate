@@ -402,6 +402,7 @@ function StatusDot({ listener }: { listener: Listener }) {
 }
 
 function Setup({ listener }: { listener: Listener }) {
+  const thaiModel = MODELS.find((m) => m.thaiOnly);
   return (
     <section
       aria-label="Włącz podpowiedzi z rozmowy"
@@ -470,6 +471,11 @@ function Setup({ listener }: { listener: Listener }) {
                     ) : null}
                   </span>
                   <span className="block text-xs text-muted">{item.hint}</span>
+                  {item.thaiOnly ? (
+                    <span className="mt-1 block text-xs text-amber-700">
+                      Duży model — na słabszych telefonach może nie działać (brak pamięci). Wtedy wybierz Uniwersalny.
+                    </span>
+                  ) : null}
                 </span>
               </label>
             );
