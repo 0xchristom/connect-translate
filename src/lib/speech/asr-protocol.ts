@@ -33,11 +33,12 @@ export type ModelOption = {
 export const MODELS: ModelOption[] = [
   {
     // ONNX z biodatlab/distill-whisper-th-small (Thonburian Whisper, MIT).
+    // Używamy fp16 (stabilniejsze z modelami _timestamped niż q8 w transformers.js v4).
     id: "supersuphot/distill-whisper-th-small-timestamped",
     revision: "4ba4a76135523d4506e5fce9ba5bb796799f19b3",
     label: "Tajski",
-    size: "170 MB",
-    hint: "Whisper douczony na tajskim — rozumie dużo lepiej. Pobierz na Wi-Fi.",
+    size: "~250 MB",
+    hint: "Whisper douczony na tajskim — rozumie dużo lepiej. Pobierz na Wi-Fi (fp16).",
     thaiOnly: true,
   },
   {
