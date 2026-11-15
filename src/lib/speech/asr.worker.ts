@@ -29,9 +29,8 @@ async function load(model: string) {
   loading = (async () => {
     const { pipeline, env } = await import("@huggingface/transformers");
     env.allowLocalModels = false;
-    // Jak NLLB: OPFS zamiast Cache Storage. Chrome odmawia plików >~400 MB w Cache Storage
-    // („Unexpected internal error”). Model Tajski (szczególnie fp16) jest na tyle duży,
-    // że OPFS jest bezpieczniejszy i stabilniejszy.
+    // Wyłączamy Cache Storage — Chrome odmawia dużych plików. OPFS jest stabilniejszy.
+    env.useBrowserCache = false;
     env.useCustomCache = true;
     env.customCache = opfsCache;
     // Hugging Face odpowiada 404 bez CORS na każde zapytanie z Refererem *.workers.dev,
