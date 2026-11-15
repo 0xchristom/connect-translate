@@ -67,15 +67,12 @@ async function load(model: string) {
         }
       };
 
-      // Model Tajski (_timestamped) jest niestabilny na WASM + fp16.
-      // Na Snapdragon 8 włączamy WebGPU i mixed dtype (encoder fp32, decoder q4) —
-      // stabilniejsze i szybsze niż czyste fp16 na WASM.
+      // Model Tajski ma tylko fp16 i q8 w ONNX. Mixed dtype (fp32/q4) nie istnieje.
+      // Używamy fp16 — stabilniejsze niż q8 na modelach _timestamped w transformers.js v4.
       const isThai = model.includes("distill-whisper-th");
       const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator;
       const device = isThai && hasWebGPU ? "webgpu" : "wasm";
-      const dtype = isThai
-        ? { encoder_model: "fp32", decoder_model_merged: "q4" }
-        : "q8";
+      const dtype = isThai ? "fp16" : "q8";
 
       const asr = await pipeline("automatic-speech-recognition", model, {
         revision: MODELS.find((item) => item.id === model)?.revision ?? "main",
