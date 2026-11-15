@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Loader2, Mic, MicOff, Volume2, X } from "lucide-react";
+import { ArrowRight, Check, Loader2, Mic, MicOff, Pause, Play, Volume2, X } from "lucide-react";
 import { categories, polish, renderPhrase, type Speaker } from "@/data/phrases";
 import { sayLine } from "@/data/words";
 import { playThai } from "@/lib/play-thai";
@@ -76,6 +76,17 @@ export function ListenPanel({
       ? Math.round((listener.progress.loaded / listener.progress.total) * 100)
       : null;
 
+  const statusLabel =
+    status === "loading"
+      ? loadingTitle(listener, percent)
+      : status === "paused"
+        ? "Wstrzymane"
+        : listener.busy
+          ? "Rozpoznaję…"
+          : listener.speaking
+            ? "Słyszę mowę…"
+            : "Słucham";
+
   return (
     <section
       aria-label="Podpowiedzi z rozmowy"
@@ -84,13 +95,7 @@ export function ListenPanel({
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface/95 px-3 py-2 backdrop-blur">
         <StatusDot listener={listener} />
         <p className="min-w-0 flex-1 truncate text-sm font-medium" aria-live="polite">
-          {status === "loading"
-            ? loadingTitle(listener, percent)
-            : listener.busy
-              ? "Rozpoznaję…"
-              : listener.speaking
-                ? "Słyszę mowę…"
-                : "Słucham"}
+          {statusLabel}
         </p>
         <div className="flex rounded-md bg-bg p-0.5" role="radiogroup" aria-label="Kto mówi">
           {MODES.map((item) => (
@@ -110,6 +115,16 @@ export function ListenPanel({
             </button>
           ))}
         </div>
+        {(status === "listening" || status === "paused") && (
+          <button
+            type="button"
+            aria-label={listener.paused ? "Wznów słuchanie" : "Wstrzymaj słuchanie"}
+            onClick={listener.togglePause}
+            className="grid size-9 place-items-center rounded-md text-muted"
+          >
+            {listener.paused ? <Play className="size-4" /> : <Pause className="size-4" />}
+          </button>
+        )}
         <button
           type="button"
           aria-label="Wyłącz słuchanie"
@@ -154,6 +169,12 @@ export function ListenPanel({
             </button>
           ) : null}
         </div>
+      ) : null}
+
+      {status === "paused" ? (
+        <p className="px-3 py-4 text-sm text-muted">
+          Słuchanie wstrzymane. Kliknij ▶, żeby wznowić.
+        </p>
       ) : null}
 
       {listener.error ? <p className="px-3 pt-2 text-xs text-red-700">{listener.error}</p> : null}
@@ -388,6 +409,8 @@ function ReplyChip({
 function StatusDot({ listener }: { listener: Listener }) {
   if (listener.status === "loading" || listener.busy)
     return <Loader2 className="size-4 shrink-0 animate-spin text-muted" aria-hidden="true" />;
+  if (listener.status === "paused")
+    return <Pause className="size-4 shrink-0 text-muted" aria-hidden="true" />;
   return (
     <span className="relative grid size-4 shrink-0 place-items-center" aria-hidden="true">
       <span
@@ -402,7 +425,6 @@ function StatusDot({ listener }: { listener: Listener }) {
 }
 
 function Setup({ listener }: { listener: Listener }) {
-  const thaiModel = MODELS.find((m) => m.thaiOnly);
   return (
     <section
       aria-label="Włącz podpowiedzi z rozmowy"
