@@ -53,6 +53,10 @@ function loadingDetail(listener: Listener) {
   return parts.join(" · ") + ". Pobiera się tylko raz — potem działa bez internetu.";
 }
 
+function currentModelLabel(modelId: string) {
+  return MODELS.find((m) => m.id === modelId)?.label ?? "Model";
+}
+
 export function ListenPanel({
   listener,
   translator,
@@ -135,6 +139,23 @@ export function ListenPanel({
         </button>
       </div>
 
+      {/* Selektor modelu — widoczny zawsze, żeby można było zmienić bez restartu */}
+      <div className="flex items-center gap-2 border-b border-line bg-bg/50 px-3 py-1.5">
+        <span className="text-xs text-muted">Model:</span>
+        <select
+          value={listener.model}
+          onChange={(e) => listener.setModel(e.target.value)}
+          className="h-7 flex-1 rounded-md border border-line bg-surface px-2 text-xs"
+          aria-label="Wybierz model mowy"
+        >
+          {MODELS.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.label} ({item.size})
+            </option>
+          ))}
+        </select>
+      </div>
+
       {status === "loading" ? (
         <div className="px-3 py-3">
           <div
@@ -154,7 +175,6 @@ export function ListenPanel({
                 style={{ width: `${Math.min(Math.max(percent, 2), 100)}%` }}
               />
             ) : (
-              // Czasu ładowania do pamięci nie da się zmierzyć — pasek pokazuje, że coś się dzieje.
               <div className="progress-indeterminate h-full w-1/3 rounded-full bg-accent" />
             )}
           </div>
@@ -286,7 +306,6 @@ function HeardCard({
         <span>Usłyszane</span>
         <span>
           rozpoznane w {(heard.ms / 1000).toLocaleString("pl-PL", { maximumFractionDigits: 1 })} s
-          {/* Bez izolacji ONNX liczy na jednym rdzeniu — wtedy wolno nie przez model, a przez przeglądarkę. */}
           {globalThis.crossOriginIsolated ? "" : " · 1 rdzeń"}
         </span>
       </p>
@@ -505,23 +524,13 @@ function Setup({ listener }: { listener: Listener }) {
         </div>
       </fieldset>
 
-      {listener.error ? (
-        <p
-          role="alert"
-          className="mt-3 flex gap-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800"
-        >
-          <MicOff className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          {listener.error}
-        </p>
-      ) : null}
-
       <button
         type="button"
-        onClick={() => void listener.start()}
-        className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-md bg-accent text-sm font-semibold text-accent-fg"
+        onClick={listener.start}
+        className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-md bg-accent text-sm font-medium text-accent-fg"
       >
-        <Mic className="size-4" aria-hidden="true" />
-        {listener.status === "error" ? "Spróbuj jeszcze raz" : "Włącz mikrofon i słuchaj"}
+        <Mic className="size-4" />
+        Słuchaj ({currentModelLabel(listener.model)})
       </button>
     </section>
   );
