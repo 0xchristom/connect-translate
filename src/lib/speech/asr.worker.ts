@@ -37,8 +37,7 @@ async function load(model: string) {
     // więc na wdrożonej aplikacji żaden model się nie pobierał. Bez Referera przechodzi.
     env.fetch = (input, init) => fetch(input, { ...init, referrerPolicy: "no-referrer" });
     // Środowisko ONNX z własnego serwera, nie z CDN: ta sama wersja co biblioteka, działa
-    // offline i nic nie wychodzi do obcych domen. Wariant bez WebGPU/asyncify (14 MB zamiast 27),
-    // bo i tak liczymy na WASM.
+    // offline i nic nie wychodzi do obcych domen.
     if (env.backends.onnx.wasm) env.backends.onnx.wasm.wasmPaths = { mjs: ortMjs, wasm: ortWasm };
     post({ type: "stage", stage: "download" });
 
@@ -68,15 +67,19 @@ async function load(model: string) {
         }
       };
 
-      // Modele _timestamped + q8 mają znane problemy z sesją ONNX w transformers.js v4
-      // (Missing required scale / MatMulNBits). Dla modelu Tajskiego preferujemy fp16,
-      // który model ma w repozytorium i działa stabilniej na mocnych telefonach.
+      // Model Tajski (_timestamped) jest niestabilny na WASM + fp16.
+      // Na Snapdragon 8 włączamy WebGPU i mixed dtype (encoder fp32, decoder q4) —
+      // stabilniejsze i szybsze niż czyste fp16 na WASM.
       const isThai = model.includes("distill-whisper-th");
-      const dtype = isThai ? "fp16" : "q8";
+      const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator;
+      const device = isThai && hasWebGPU ? "webgpu" : "wasm";
+      const dtype = isThai
+        ? { encoder_model: "fp32", decoder_model_merged: "q4" }
+        : "q8";
 
       const asr = await pipeline("automatic-speech-recognition", model, {
         revision: MODELS.find((item) => item.id === model)?.revision ?? "main",
-        device: "wasm",
+        device,
         dtype,
         progress_callback: (info: {
           status: string;
@@ -102,9 +105,8 @@ async function load(model: string) {
       });
       if (!initPosted) post({ type: "stage", stage: "init" });
       transcriber = asr as unknown as Transcriber;
-      // Rozgrzewka: pierwsze wywołanie inicjuje WASM i alokuje pamięć, więc nie płaci za to
-      // pierwsza prawdziwa wypowiedź. Jeden token wystarczy — na ciszy Whisper bez limitu
-      // zapętla się („สิบ สิบ สิบ…”) do ~450 tokenów, co na telefonie trwało minutami.
+      // Rozgrzewka: pierwsze wywołanie inicjuje WASM/WebGPU i alokuje pamięć.
+      // Jeden token wystarczy — na ciszy Whisper bez limitu zapętla się.
       await transcriber(new Float32Array(16000), {
         language: "thai",
         task: "transcribe",
