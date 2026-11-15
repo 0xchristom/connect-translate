@@ -61,6 +61,15 @@ function micError(error: unknown) {
   return "Nie udało się włączyć mikrofonu.";
 }
 
+function workerFailMessage(modelId: string) {
+  const model = MODELS.find((m) => m.id === modelId);
+  const isThai = model?.thaiOnly;
+  if (isThai) {
+    return "Model Tajski (170 MB) nie uruchomił się w tej przeglądarce — często przez brak pamięci na telefonie. Wybierz model Uniwersalny (77 MB) albo Lekki.";
+  }
+  return "Rozpoznawanie mowy nie działa w tej przeglądarce albo na tym urządzeniu. Spróbuj lżejszego modelu (Uniwersalny / Lekki).";
+}
+
 type WakeLock = { release: () => Promise<void> };
 
 export function useListener() {
@@ -174,12 +183,11 @@ export function useListener() {
       } else if (message.type === "error") {
         inFlight.current = false;
         setBusy(false);
-        // Techniczny powód w nawiasie — bez niego nie da się zdiagnozować problemu z telefonu.
-        setError(
+        const base =
           message.id === undefined
-            ? `Nie udało się pobrać modelu mowy. Sprawdź internet i spróbuj jeszcze raz. (${message.message})`
-            : "Nie udało się rozpoznać ostatniej wypowiedzi.",
-        );
+            ? `Nie udało się uruchomić modelu. ${workerFailMessage(modelRef.current)} (${message.message})`
+            : "Nie udało się rozpoznać ostatniej wypowiedzi.";
+        setError(base);
         if (message.id === undefined) {
           loadingFor.current = null;
           setStatus("error");
@@ -189,7 +197,7 @@ export function useListener() {
     };
     const fail = () => {
       loadingFor.current = null;
-      setError("Rozpoznawanie mowy nie działa w tej przeglądarce.");
+      setError(workerFailMessage(modelRef.current));
       setStatus("error");
     };
     created.onerror = fail;
@@ -339,9 +347,7 @@ export function useListener() {
       } else if (quiet > INIT_TIMEOUT_MS) {
         killWorker();
         stopMic();
-        setError(
-          "Model nie uruchomił się — telefonowi mogło zabraknąć pamięci. Spróbuj jeszcze raz albo wybierz lżejszy model.",
-        );
+        setError(workerFailMessage(modelRef.current));
         setStatus("error");
       }
     }, 1000);
