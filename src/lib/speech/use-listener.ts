@@ -10,7 +10,7 @@ import { startMic, type MicHandle } from "./mic";
 export const matcher = createMatcher(categories, cues, hallucinations);
 
 export type ListenMode = "th" | "pl";
-export type ListenStatus = "off" | "setup" | "loading" | "listening" | "error";
+export type ListenStatus = "off" | "setup" | "loading" | "listening" | "paused" | "error";
 
 export type Heard = {
   id: number;
@@ -65,7 +65,7 @@ function workerFailMessage(modelId: string) {
   const model = MODELS.find((m) => m.id === modelId);
   const isThai = model?.thaiOnly;
   if (isThai) {
-    return "Model Tajski (170 MB) nie uruchomił się w tej przeglądarce — często przez brak pamięci na telefonie. Wybierz model Uniwersalny (77 MB) albo Lekki.";
+    return "Model Tajski nie uruchomił się w tej przeglądarce. Spróbuj jeszcze raz albo wybierz Uniwersalny.";
   }
   return "Rozpoznawanie mowy nie działa w tej przeglądarce albo na tym urządzeniu. Spróbuj lżejszego modelu (Uniwersalny / Lekki).";
 }
@@ -87,6 +87,7 @@ export function useListener() {
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<Heard[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
 
   const worker = useRef<Worker | null>(null);
   const mic = useRef<MicHandle | null>(null);
@@ -247,6 +248,7 @@ export function useListener() {
   /** Wywoływać z kliknięcia — iOS pozwala włączyć mikrofon i dźwięk tylko po geście. */
   const start = useCallback(async () => {
     setError(null);
+    setPaused(false);
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("Ta przeglądarka nie daje dostępu do mikrofonu.");
       setStatus("error");
@@ -292,6 +294,7 @@ export function useListener() {
   const stop = useCallback(() => {
     stopMic();
     queued.current = null;
+    setPaused(false);
     setStatus("off");
   }, [stopMic]);
 
@@ -299,6 +302,19 @@ export function useListener() {
     setError(null);
     setStatus("setup");
   }, []);
+
+  /** Pauza: wycisza detektor mowy, ale nie wyłącza mikrofonu ani modelu. */
+  const togglePause = useCallback(() => {
+    if (!mic.current) return;
+    const next = !paused;
+    setPaused(next);
+    mic.current.setMuted(next);
+    setStatus(next ? "paused" : "listening");
+    if (next) {
+      setLevel(0);
+      setSpeaking(false);
+    }
+  }, [paused]);
 
   const setModel = useCallback(
     (id: string) => {
@@ -356,7 +372,7 @@ export function useListener() {
 
   // Blokada wygaszania znika po schowaniu karty — odnawiamy ją po powrocie.
   useEffect(() => {
-    if (status !== "listening") return;
+    if (status !== "listening" && status !== "paused") return;
     const onVisible = async () => {
       if (document.visibilityState !== "visible" || !mic.current) return;
       try {
@@ -394,10 +410,12 @@ export function useListener() {
     busy,
     history,
     error,
+    paused,
     start,
     stop,
     retry,
     open,
+    togglePause,
     setModel,
     setMode,
     clear: () => setHistory([]),
