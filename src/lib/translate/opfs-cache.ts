@@ -9,6 +9,7 @@ type Progress = (data: { progress: number; loaded: number; total: number }) => v
 const DONE = ".done";
 
 function fileName(key: string) {
+  // Stabilny klucz: pełny URL, ale znaki specjalne na _, żeby OPFS go przyjął.
   return key.replace(/[^\w.-]+/g, "_");
 }
 
@@ -35,8 +36,16 @@ export const opfsCache = {
       const name = fileName(key);
       await dir.getFileHandle(name + DONE);
       const file = await (await dir.getFileHandle(name)).getFile();
-      return new Response(file, { headers: { "content-length": String(file.size) } });
-    } catch {
+      // Zwracamy Response z plikiem — transformers.js oczekuje tego formatu.
+      return new Response(file, {
+        headers: {
+          "content-length": String(file.size),
+          "content-type": "application/octet-stream",
+        },
+      });
+    } catch (err) {
+      // Miss — plik nie istnieje lub nie ma znacznika .done.
+      // console.debug("[opfs] miss", key, err);
       return undefined;
     }
   },
@@ -44,6 +53,7 @@ export const opfsCache = {
   async put(key: string, response: Response, progress?: Progress) {
     const dir = await directory();
     const name = fileName(key);
+    // Usuwamy stary znacznik, żeby przerwane pobieranie nie udawało gotowego.
     await dir.removeEntry(name + DONE).catch(() => {});
     const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
     const total = Number(response.headers.get("content-length")) || 0;
@@ -55,8 +65,16 @@ export const opfsCache = {
         controller.enqueue(chunk);
       },
     });
-    if (response.body) await response.body.pipeThrough(counter).pipeTo(writable);
-    else await writable.close();
-    await dir.getFileHandle(name + DONE, { create: true });
+    try {
+      if (response.body) await response.body.pipeThrough(counter).pipeTo(writable);
+      else await writable.close();
+      // Znacznik dopiero po pełnym zapisie.
+      await dir.getFileHandle(name + DONE, { create: true });
+    } catch (err) {
+      // Nieudany zapis — czyścimy, żeby nie został półplik.
+      await writable.close().catch(() => {});
+      await dir.removeEntry(name).catch(() => {});
+      throw err;
+    }
   },
 };
