@@ -37,63 +37,79 @@ async function load(model: string) {
     // bo i tak liczymy na WASM.
     if (env.backends.onnx.wasm) env.backends.onnx.wasm.wasmPaths = { mjs: ortMjs, wasm: ortWasm };
     post({ type: "stage", stage: "download" });
-    // `progress_total` zna rozmiary wszystkich plików z góry, więc pasek nie cofa się, gdy
-    // zaczyna się kolejny plik. Pojedyncze `progress` zostają na wypadek, gdyby go zabrakło.
-    const files = new Map<string, { loaded: number; total: number }>();
-    let hasTotal = false;
-    let lastPost = 0;
-    let initPosted = false;
-    const report = (loaded: number, total: number) => {
-      const now = performance.now();
-      const finished = total > 0 && loaded >= total;
-      // Tysiące zdarzeń na plik — wystarczy kilka na sekundę.
-      if (!finished && now - lastPost < 150) return;
-      lastPost = now;
-      post({ type: "progress", loaded, total });
-      if (finished && !initPosted) {
-        initPosted = true;
-        post({ type: "stage", stage: "init" });
-      }
-    };
-    const asr = await pipeline("automatic-speech-recognition", model, {
-      revision: MODELS.find((item) => item.id === model)?.revision ?? "main",
-      // WASM + 8 bitów: najmniejszy plik i działa na każdym telefonie. Na WebGPU dobre
-      // warianty Whispera ważą ~200 MB, więc nie opłacają się w aplikacji mobilnej.
-      device: "wasm",
-      dtype: "q8",
-      progress_callback: (info: {
-        status: string;
-        file?: string;
-        loaded?: number;
-        total?: number;
-      }) => {
-        if (info.status === "progress_total") {
-          hasTotal = true;
-          report(info.loaded ?? 0, info.total ?? 0);
-          return;
+
+    // Heartbeat: jeśli progress_callback milczy (duże pliki, wolne CDN, albo blokada na sesji ONNX),
+    // główny wątek nie myśli, że pobieranie stoi.
+    const heartbeat = setInterval(() => {
+      post({ type: "progress", loaded: 0, total: 0 }); // zerowy progress = żywy, ale bez danych
+    }, 4000);
+
+    try {
+      // `progress_total` zna rozmiary wszystkich plików z góry, więc pasek nie cofa się, gdy
+      // zaczyna się kolejny plik. Pojedyncze `progress` zostają na wypadek, gdyby go zabrakło.
+      const files = new Map<string, { loaded: number; total: number }>();
+      let hasTotal = false;
+      let lastPost = 0;
+      let initPosted = false;
+      const report = (loaded: number, total: number) => {
+        const now = performance.now();
+        const finished = total > 0 && loaded >= total;
+        // Tysiące zdarzeń na plik — wystarczy kilka na sekundę.
+        if (!finished && now - lastPost < 150) return;
+        lastPost = now;
+        post({ type: "progress", loaded, total });
+        if (finished && !initPosted) {
+          initPosted = true;
+          post({ type: "stage", stage: "init" });
         }
-        if (hasTotal || info.status !== "progress" || !info.file) return;
-        files.set(info.file, { loaded: info.loaded ?? 0, total: info.total ?? 0 });
-        let loaded = 0;
-        let total = 0;
-        for (const item of files.values()) {
-          loaded += item.loaded;
-          total += item.total;
-        }
-        report(loaded, total);
-      },
-    });
-    if (!initPosted) post({ type: "stage", stage: "init" });
-    transcriber = asr as unknown as Transcriber;
-    // Rozgrzewka: pierwsze wywołanie inicjuje WASM i alokuje pamięć, więc nie płaci za to
-    // pierwsza prawdziwa wypowiedź. Jeden token wystarczy — na ciszy Whisper bez limitu
-    // zapętla się („สิบ สิบ สิบ…”) do ~450 tokenów, co na telefonie trwało minutami.
-    await transcriber(new Float32Array(16000), {
-      language: "thai",
-      task: "transcribe",
-      max_new_tokens: 1,
-    });
-    return transcriber;
+      };
+
+      // Modele _timestamped + q8 mają znane problemy z sesją ONNX w transformers.js v4
+      // (Missing required scale / MatMulNBits). Dla modelu Tajskiego preferujemy fp16,
+      // który model ma w repozytorium i działa stabilniej na mocnych telefonach.
+      const isThai = model.includes("distill-whisper-th");
+      const dtype = isThai ? "fp16" : "q8";
+
+      const asr = await pipeline("automatic-speech-recognition", model, {
+        revision: MODELS.find((item) => item.id === model)?.revision ?? "main",
+        device: "wasm",
+        dtype,
+        progress_callback: (info: {
+          status: string;
+          file?: string;
+          loaded?: number;
+          total?: number;
+        }) => {
+          if (info.status === "progress_total") {
+            hasTotal = true;
+            report(info.loaded ?? 0, info.total ?? 0);
+            return;
+          }
+          if (hasTotal || info.status !== "progress" || !info.file) return;
+          files.set(info.file, { loaded: info.loaded ?? 0, total: info.total ?? 0 });
+          let loaded = 0;
+          let total = 0;
+          for (const item of files.values()) {
+            loaded += item.loaded;
+            total += item.total;
+          }
+          report(loaded, total);
+        },
+      });
+      if (!initPosted) post({ type: "stage", stage: "init" });
+      transcriber = asr as unknown as Transcriber;
+      // Rozgrzewka: pierwsze wywołanie inicjuje WASM i alokuje pamięć, więc nie płaci za to
+      // pierwsza prawdziwa wypowiedź. Jeden token wystarczy — na ciszy Whisper bez limitu
+      // zapętla się („สิบ สิบ สิบ…”) do ~450 tokenów, co na telefonie trwało minutami.
+      await transcriber(new Float32Array(16000), {
+        language: "thai",
+        task: "transcribe",
+        max_new_tokens: 1,
+      });
+      return transcriber;
+    } finally {
+      clearInterval(heartbeat);
+    }
   })();
   try {
     return await loading;
