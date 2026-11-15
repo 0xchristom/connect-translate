@@ -1,11 +1,12 @@
 /// <reference lib="webworker" />
 /**
  * Whisper uruchamiany w całości na urządzeniu (transformers.js + ONNX Runtime Web).
- * Model pobiera się raz z Hugging Face i zostaje w Cache Storage — potem działa offline,
- * a nagrania nigdy nie opuszczają telefonu.
+ * Model pobiera się raz do OPFS (jak NLLB) — Cache Storage w Chrome nie radzi sobie
+ * z dużymi plikami. Potem działa offline, nagrania nigdy nie opuszczają telefonu.
  */
 import ortMjs from "onnxruntime-web/ort-wasm-simd-threaded.mjs?url";
 import ortWasm from "onnxruntime-web/ort-wasm-simd-threaded.wasm?url";
+import { opfsCache } from "../translate/opfs-cache";
 import { MODELS, type AsrRequest, type AsrResponse } from "./asr-protocol";
 
 type Transcriber = (
@@ -28,7 +29,11 @@ async function load(model: string) {
   loading = (async () => {
     const { pipeline, env } = await import("@huggingface/transformers");
     env.allowLocalModels = false;
-    env.useBrowserCache = true;
+    // Jak NLLB: OPFS zamiast Cache Storage. Chrome odmawia plików >~400 MB w Cache Storage
+    // („Unexpected internal error”). Model Tajski (szczególnie fp16) jest na tyle duży,
+    // że OPFS jest bezpieczniejszy i stabilniejszy.
+    env.useCustomCache = true;
+    env.customCache = opfsCache;
     // Hugging Face odpowiada 404 bez CORS na każde zapytanie z Refererem *.workers.dev,
     // więc na wdrożonej aplikacji żaden model się nie pobierał. Bez Referera przechodzi.
     env.fetch = (input, init) => fetch(input, { ...init, referrerPolicy: "no-referrer" });
