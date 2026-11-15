@@ -32,13 +32,23 @@ export type ModelOption = {
 
 export const MODELS: ModelOption[] = [
   {
-    // ONNX z biodatlab/distill-whisper-th-small (Thonburian Whisper, MIT).
-    // Używamy fp16 (stabilniejsze z modelami _timestamped niż q8 w transformers.js v4).
+    // ONNX z biodatlab/distill-whisper-th-small (Thonburian Whisper).
+    // Na Snapdragon 8 używa WebGPU + mixed dtype (encoder fp32, decoder q4) dla stabilności.
     id: "supersuphot/distill-whisper-th-small-timestamped",
     revision: "4ba4a76135523d4506e5fce9ba5bb796799f19b3",
-    label: "Tajski",
+    label: "Tajski (WebGPU)",
     size: "~250 MB",
-    hint: "Whisper douczony na tajskim — rozumie dużo lepiej. Pobierz na Wi-Fi (fp16).",
+    hint: "Najlepszy na tajski. Na Snapdragon 8 działa na GPU. Jeśli niestabilny — użyj „Tajski (stabilny)”.",
+    thaiOnly: true,
+  },
+  {
+    // Stabilna alternatywa: standardowy whisper-small z wymuszonym językiem thai.
+    // Mniej precyzyjny na tajskim, ale stabilny na WASM i nie ma problemów z timestamped.
+    id: "onnx-community/whisper-small",
+    revision: "main",
+    label: "Tajski (stabilny)",
+    size: "~150 MB",
+    hint: "Standardowy Whisper Small. Mniej dokładny na tajskim, ale stabilny na każdym telefonie.",
     thaiOnly: true,
   },
   {
